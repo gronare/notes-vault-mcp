@@ -190,6 +190,7 @@ def _relevant(note: Note, path: str | None, repo: str | None) -> bool:
 @dataclass
 class ContextBundle:
     system: list[tuple[Note, str]] = field(default_factory=list)
+    system_rows: list[Note] = field(default_factory=list)
     tasks: list[Note] = field(default_factory=list)
     references: list[Note] = field(default_factory=list)
     log_tail: list[str] = field(default_factory=list)
@@ -201,6 +202,12 @@ class ContextBundle:
         blocks = []
         if self.system:
             blocks.append("## system notes\n" + "\n\n".join(f"### {note.key}\n{text}" for note, text in self.system))
+        if self.system_rows:
+            rows = [
+                f"{note.key} | {note.title} | {humanize_age(age_days(note, now))} | {note.status}"
+                for note in self.system_rows
+            ]
+            blocks.append("## other system notes\n" + "\n".join(rows))
         if self.tasks:
             rows = [_task_row(note, now, self.stale_after_days) for note in self.tasks]
             blocks.append("## open tasks\n" + "\n".join(rows))
@@ -226,18 +233,31 @@ def _truncate(text: str) -> str:
     return text[:CONTEXT_TRUNCATE] + "\n" + TRUNCATED_MARKER
 
 
-def _system_notes(vault: Vault, notes: list[Note], path: str | None, repo: str | None) -> list[tuple[Note, str]]:
+def _system_rank(note: Note, path: str | None, repo: str | None) -> tuple:
+    target = expand_home(path).rstrip("/") if path else ""
+    exact = any(expand_home(p).rstrip("/") == target for p in note.paths) if target else False
+    return (not exact, note.stem != repo, note.status != "active", -path_overlap(note, path), note.key)
+
+
+def _system_notes(
+    vault: Vault, notes: list[Note], path: str | None, repo: str | None
+) -> tuple[list[tuple[Note, str]], list[Note]]:
     folders = set(vault.schema.system_folders)
     candidates = [n for n in notes if (n.kind == "system" or n.folder in folders) and _relevant(n, path, repo)]
-    candidates.sort(key=lambda note: (-path_overlap(note, path), note.key))
+    candidates.sort(key=lambda note: _system_rank(note, path, repo))
+    hub = next((n for n in candidates if n.stem == repo), None)
+    floor = path_overlap(hub, path) if hub else -1
+    full = ([hub] if hub else []) + [n for n in candidates if n is not hub and path_overlap(n, path) > floor]
+    full = full[:3]
     loaded = []
-    for note in candidates[:3]:
+    for note in full:
         try:
             text, _ = _read(vault, note.key)
         except Exception:
             continue
         loaded.append((note, _truncate(text)))
-    return loaded
+    rows = [n for n in candidates if n not in full][:15]
+    return loaded, rows
 
 
 def _log_tail(vault: Vault, repo: str | None) -> list[str]:
@@ -276,8 +296,10 @@ def context(
     ]
     tasks.sort(key=lambda note: note.updated, reverse=True)
     references.sort(key=lambda note: note.updated, reverse=True)
+    system, system_rows = _system_notes(vault, notes, path, repo)
     return ContextBundle(
-        system=_system_notes(vault, notes, path, repo),
+        system=system,
+        system_rows=system_rows,
         tasks=tasks[:limit],
         references=references[:limit],
         log_tail=_log_tail(vault, repo),

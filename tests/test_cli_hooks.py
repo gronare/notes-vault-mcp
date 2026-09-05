@@ -212,3 +212,27 @@ def test_session_start_follows_a_symlinked_repo_path(
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "session-start"]) == 0
     assert "commits since the note — Areas/stomme.md" in capsys.readouterr().out
+
+
+def test_commits_since_shows_the_count_and_the_newest_ten(tmp_path):
+    import subprocess
+
+    from notes_vault_mcp.hooks import _commits_since
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+        "PATH": "/usr/bin:/bin:/opt/homebrew/bin",
+    }
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, env=env)
+    for i in range(12):
+        (root / "f.txt").write_text(str(i))
+        subprocess.run(["git", "add", "f.txt"], cwd=root, check=True, env=env)
+        subprocess.run(["git", "commit", "-q", "-m", f"commit {i}"], cwd=root, check=True, env=env)
+    text = _commits_since(root, "2000-01-01", [str(root)])
+    assert text.startswith("12 commits, newest 10:")
+    assert len(text.splitlines()) == 11

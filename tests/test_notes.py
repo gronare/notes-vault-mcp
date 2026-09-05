@@ -213,3 +213,38 @@ def test_the_log_filename_follows_the_schema_setting(vault: Vault):
     notes.log_append(vault, "stomme", "rad")
     assert vault.backend.get("Log/logg-stomme.md")[0].startswith("---")
     assert notes.log_lines(vault, "stomme", date.today().isoformat()[:7])
+
+
+def test_context_puts_the_hub_note_before_a_draft_with_the_same_path(vault: Vault):
+    notes.write(
+        vault,
+        "Areas/avtal-utkast.md",
+        "---\ntitle: Avtal utkast\ndate: 2026-07-01\nupdated: 2026-07-01\ntags: [greenhouse]\nstatus: draft\n"
+        "kind: system\npath: ~/projects/greenhouse\n---\n\nEtt utkast.\n",
+    )
+    bundle = notes.context(vault, path=GREENHOUSE, repo="greenhouse")
+    assert [note.key for note, _ in bundle.system][0] == "Areas/greenhouse.md"
+
+
+def test_context_reads_a_deeper_system_note_in_full_and_lists_root_level_ones_as_rows(vault: Vault):
+    notes.write(
+        vault,
+        "Areas/greenhouse-bokning.md",
+        "---\ntitle: Bokning\ndate: 2026-07-01\nupdated: 2026-07-01\ntags: [greenhouse]\nstatus: active\n"
+        "kind: system\npath: ~/projects/greenhouse/app/models/bookings\n---\n\nBokningsdomänen.\n",
+    )
+    notes.write(
+        vault,
+        "Areas/greenhouse-personuppgifter.md",
+        "---\ntitle: Personuppgifter\ndate: 2026-07-01\nupdated: 2026-07-01\ntags: [greenhouse]\nstatus: active\n"
+        "kind: system\npath: ~/projects/greenhouse\n---\n\nInventering.\n",
+    )
+    at_root = notes.context(vault, path=GREENHOUSE, repo="greenhouse")
+    assert [note.key for note, _ in at_root.system] == ["Areas/greenhouse.md"]
+    assert {note.key for note in at_root.system_rows} >= {
+        "Areas/greenhouse-bokning.md",
+        "Areas/greenhouse-personuppgifter.md",
+    }
+    deep = notes.context(vault, path=f"{GREENHOUSE}/app/models/bookings", repo="greenhouse")
+    assert [note.key for note, _ in deep.system] == ["Areas/greenhouse.md", "Areas/greenhouse-bokning.md"]
+    assert "## other system notes" in at_root.render()

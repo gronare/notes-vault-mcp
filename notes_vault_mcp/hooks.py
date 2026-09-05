@@ -48,10 +48,17 @@ def read_hook_input(raw: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+COMMITS_SHOWN = 10
+
+
 def _commits_since(root: Path, since: str, paths: list[str]) -> str:
     if not since or not paths:
         return ""
-    return git(["log", "--oneline", f"--since={since}", "--", *paths], root)
+    lines = git(["log", "--oneline", f"--since={since}", "--", *paths], root).splitlines()
+    if len(lines) <= COMMITS_SHOWN:
+        return "\n".join(lines)
+    shown = "\n".join(lines[:COMMITS_SHOWN])
+    return f"{len(lines)} commits, newest {COMMITS_SHOWN}:\n{shown}"
 
 
 def session_start_text(vault: Vault, cwd: str) -> str:
