@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from importlib import resources
 from pathlib import Path
@@ -70,10 +71,25 @@ def command_hook(args: argparse.Namespace) -> int:
     return 0
 
 
+PERIOD_RE = re.compile(r"^\d{4}(-\d{2})?$")
+
+
 def command_changelog(args: argparse.Namespace) -> int:
     vault = open_vault()
     vault.index.sync()
+    if args.all:
+        period = args.period or (args.repo if args.repo and PERIOD_RE.match(args.repo) else None)
+        for key in changelog.write_all(vault, periods=[period] if period else None):
+            print(f"wrote {key}")
+        return 0
+    if not args.repo or not args.period:
+        print("changelog needs <repo> <period>, or --all", file=sys.stderr)
+        return 2
     repo_path = Path(args.repo_path).expanduser() if args.repo_path else None
+    if args.write:
+        changed = changelog.write_page(vault, args.repo, args.period, repo_path)
+        print(("wrote " if changed else "unchanged ") + vault.schema.period_key(args.repo, args.period))
+        return 0
     print(changelog.render(vault, args.repo, args.period, repo_path))
     return 0
 
@@ -124,10 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     hook.add_argument("event", choices=("session-start", "stop"))
     hook.set_defaults(func=command_hook)
 
-    log = sub.add_parser("changelog", help="print the log lines, commits and notes for a period")
-    log.add_argument("repo")
-    log.add_argument("period", help="YYYY-MM or YYYY")
+    log = sub.add_parser("changelog", help="print or write the log lines, commits and notes for a period")
+    log.add_argument("repo", nargs="?")
+    log.add_argument("period", nargs="?", help="YYYY-MM or YYYY")
     log.add_argument("--repo-path", help="the git checkout to read commits from")
+    log.add_argument("--write", action="store_true", help="write the period page into the vault instead of printing")
+    log.add_argument("--all", action="store_true", help="write the period pages for every repo the hooks have seen")
     log.set_defaults(func=command_changelog)
 
     lint = sub.add_parser("lint", help="report vault drift")

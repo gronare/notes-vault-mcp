@@ -19,7 +19,7 @@ EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError)
 SEARCH_DESCRIPTION = (
     "CHEAP — start here. Full-text search over the local SQLite index of the vault; it never "
     "downloads the whole vault. Matches title, summary, tags and body, folds diacritics, expands "
-    "synonyms and accepts \"quoted phrases\". A bare commit sha looks up the notes that mention it. "
+    'synonyms and accepts "quoted phrases". A bare commit sha looks up the notes that mention it. '
     "Excludes the archive and superseded notes unless you ask for them, and reports how many it hid."
 )
 

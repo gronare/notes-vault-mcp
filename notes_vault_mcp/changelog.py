@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
-from notes_vault_mcp.hooks import git
-from notes_vault_mcp.notes import changelog_notes, log_lines
+from notes_vault_mcp.backends import NotFound
+from notes_vault_mcp.frontmatter import dump, parse
+from notes_vault_mcp.git import git, is_checkout
+from notes_vault_mcp.index import Note, stem_of
+from notes_vault_mcp.notes import _reindex, changelog_notes, log_lines, today
 from notes_vault_mcp.vault import Vault
 
-PERIOD_LENGTHS = {4: "year", 7: "month"}
+GENERATED_START = "<!-- changelog:generated -->"
+GENERATED_END = "<!-- /changelog:generated -->"
+PREVIOUS_MONTH_GRACE_DAYS = 7
 
 
 def period_bounds(period: str) -> tuple[str, str]:
@@ -17,6 +23,14 @@ def period_bounds(period: str) -> tuple[str, str]:
     year, month = (int(part) for part in period.split("-"))
     end_year, end_month = (year + 1, 1) if month == 12 else (year, month + 1)
     return f"{year}-{month:02d}-01", f"{end_year}-{end_month:02d}-01"
+
+
+def periods_due(on: date) -> list[str]:
+    current = on.strftime("%Y-%m")
+    if on.day > PREVIOUS_MONTH_GRACE_DAYS:
+        return [current]
+    previous = date(on.year - 1, 12, 1) if on.month == 1 else date(on.year, on.month - 1, 1)
+    return [previous.strftime("%Y-%m"), current]
 
 
 def git_commits(repo_path: Path, period: str) -> dict[str, list[str]]:
@@ -30,12 +44,16 @@ def git_commits(repo_path: Path, period: str) -> dict[str, list[str]]:
     return dict(sorted(by_day.items()))
 
 
-def render(vault: Vault, repo: str, period: str, repo_path: Path | None) -> str:
-    blocks = [f"# {repo} — {period}"]
+def _belongs(note: Note, repo: str) -> bool:
+    if note.kind == "log":
+        return False
+    return repo in note.tags or stem_of(note.area.strip("[]").split("|")[0]) == repo
 
+
+def sections(vault: Vault, repo: str, period: str, repo_path: Path | None) -> list[str]:
+    blocks = []
     lines = log_lines(vault, repo, period)
     blocks.append("## log\n" + ("\n".join(lines) if lines else "- (no log lines)"))
-
     if repo_path is not None:
         by_day = git_commits(repo_path, period)
         if by_day:
@@ -43,12 +61,80 @@ def render(vault: Vault, repo: str, period: str, repo_path: Path | None) -> str:
             blocks.append("## commits\n" + "\n".join(days))
         else:
             blocks.append("## commits\n- (no commits)")
-
-    notes = sorted(changelog_notes(vault, period), key=lambda note: (note.date, note.key))
+    notes = sorted(
+        (note for note in changelog_notes(vault, period) if _belongs(note, repo)),
+        key=lambda note: (note.date, note.key),
+    )
     if notes:
         rows = [f"- [[{note.stem}]] — {note.title} ({note.date}, {note.folder})" for note in notes]
         blocks.append("## notes\n" + "\n".join(rows))
     else:
         blocks.append("## notes\n- (no notes)")
+    return blocks
 
-    return "\n\n".join(blocks)
+
+def render(vault: Vault, repo: str, period: str, repo_path: Path | None) -> str:
+    return "\n\n".join([f"# {repo} — {period}", *sections(vault, repo, period, repo_path)])
+
+
+def generated_block(vault: Vault, repo: str, period: str, repo_path: Path | None) -> str:
+    return "\n".join([GENERATED_START, "\n\n".join(sections(vault, repo, period, repo_path)), GENERATED_END])
+
+
+def splice(body: str, block: str) -> str:
+    start = body.find(GENERATED_START)
+    end = body.find(GENERATED_END)
+    if start != -1 and end > start:
+        return body[:start] + block + body[end + len(GENERATED_END) :]
+    return f"{body.rstrip()}\n\n{block}\n" if body.strip() else f"{block}\n"
+
+
+def _log_area(vault: Vault, repo: str) -> str:
+    note = vault.index.note(vault.schema.log_key(repo))
+    return note.area if note and note.area else f"[[{repo}]]"
+
+
+def _new_page(vault: Vault, repo: str, period: str) -> dict:
+    return {
+        "title": f"{repo} — {period}",
+        "date": period_bounds(period)[0],
+        "updated": today(),
+        "tags": ["log", repo],
+        "status": "active",
+        "kind": "log",
+        "area": _log_area(vault, repo),
+    }
+
+
+def period_over(period: str, on: date | None = None) -> bool:
+    return (on or date.today()).isoformat() >= period_bounds(period)[1]
+
+
+def write_page(vault: Vault, repo: str, period: str, repo_path: Path | None) -> bool:
+    key = vault.schema.period_key(repo, period)
+    try:
+        text, _ = vault.backend.get(key)
+        frontmatter, body = parse(text)
+        existed = True
+    except NotFound:
+        frontmatter, body, existed = _new_page(vault, repo, period), "", False
+    new_body = splice(body, generated_block(vault, repo, period, repo_path))
+    if existed and new_body == body:
+        return False
+    frontmatter["updated"] = today()
+    frontmatter["status"] = "complete" if period_over(period) else "active"
+    out = dump(frontmatter, new_body)
+    _reindex(vault, key, out, vault.backend.put(key, out))
+    return True
+
+
+def write_all(vault: Vault, periods: list[str] | None = None, repos: list[tuple[str, str]] | None = None) -> list[str]:
+    written = []
+    for repo, root in repos if repos is not None else vault.index.known_repos():
+        path = Path(root)
+        if not is_checkout(path):
+            continue
+        for period in periods or periods_due(date.today()):
+            if write_page(vault, repo, period, path):
+                written.append(vault.schema.period_key(repo, period))
+    return written

@@ -1,43 +1,23 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import subprocess
 import time
+from datetime import date
 from pathlib import Path
 
+from notes_vault_mcp import changelog
+from notes_vault_mcp.git import git, repo_name, repo_root
 from notes_vault_mcp.notes import OPEN_STATUSES, context, vault_paths_in
 from notes_vault_mcp.search import age_days, humanize_age
 from notes_vault_mcp.vault import Vault, open_vault
 
-GIT_TIMEOUT = 10
 STOP_STALE_DAYS = 14
 SHA_PREFIX_LENGTH = 7
+CHANGELOG_META = "changelog_ran_on"
 
-
-def git(args: list[str], cwd: str | Path) -> str:
-    try:
-        done = subprocess.run(
-            ["git", *args],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return done.stdout.strip() if done.returncode == 0 else ""
-
-
-def repo_root(cwd: str | Path) -> Path | None:
-    top = git(["rev-parse", "--show-toplevel"], cwd)
-    return Path(top) if top else None
-
-
-def repo_name(cwd: str | Path) -> str:
-    root = repo_root(cwd)
-    return (root or Path(cwd)).name
+__all__ = ["git", "repo_name", "repo_root"]
 
 
 def read_hook_input(raw: str) -> dict:
@@ -68,6 +48,7 @@ def session_start_text(vault: Vault, cwd: str) -> str:
     root = repo_root(cwd)
     if root is None:
         return "\n\n".join(blocks)
+    vault.index.remember_repo(repo, str(root))
     for note, _ in bundle.system:
         paths = vault_paths_in(note, root)
         commits = _commits_since(root, note.updated, paths)
@@ -134,6 +115,15 @@ def _reason(commits: list[tuple[str, str]], stale: list[str], repo: str) -> str:
     return "The vault is behind this session. " + "; ".join(parts)
 
 
+def refresh_month_pages(vault: Vault, today: date | None = None) -> list[str]:
+    stamp = (today or date.today()).isoformat()
+    if vault.index.meta(CHANGELOG_META) == stamp:
+        return []
+    vault.index.set_meta(CHANGELOG_META, stamp)
+    vault.index.db.commit()
+    return changelog.write_all(vault, periods=changelog.periods_due(today or date.today()))
+
+
 def stop(raw: str) -> str | None:
     data = read_hook_input(raw)
     if data.get("stop_hook_active"):
@@ -148,6 +138,8 @@ def stop(raw: str) -> str | None:
     vault = open_vault()
     try:
         vault.index.sync()
+        with contextlib.suppress(Exception):
+            refresh_month_pages(vault)
         commits = unlogged_commits(vault, root, repo)
         stale = stale_open_notes(vault, repo, cwd)
     finally:

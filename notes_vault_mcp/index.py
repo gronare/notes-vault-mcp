@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS shas_sha ON shas(sha);
 CREATE TABLE IF NOT EXISTS links (src TEXT, target TEXT);
 CREATE INDEX IF NOT EXISTS links_target ON links(target);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS repos (repo TEXT PRIMARY KEY, root TEXT, seen_at TEXT);
 """
 
 NOTE_COLUMNS = (
@@ -177,15 +178,42 @@ class Index:
     def set_meta(self, key: str, value: str) -> None:
         self.db.execute("INSERT INTO meta(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", (key, value))
 
+    def remember_repo(self, repo: str, root: str) -> None:
+        self.db.execute(
+            "INSERT INTO repos(repo, root, seen_at) VALUES(?, ?, ?) "
+            "ON CONFLICT(repo) DO UPDATE SET root = excluded.root, seen_at = excluded.seen_at",
+            (repo, root, time.strftime("%Y-%m-%d")),
+        )
+        self.db.commit()
+
+    def known_repos(self) -> list[tuple[str, str]]:
+        rows = self.db.execute("SELECT repo, root FROM repos ORDER BY repo").fetchall()
+        return [(row["repo"], row["root"]) for row in rows]
+
     def upsert(self, key: str, text: str, version: str, mtime: float, size: int) -> Note:
         note, body = note_from_text(key, text, version, mtime, size)
         self.remove(key)
         self.db.execute(
             f"INSERT INTO notes ({NOTE_COLUMNS}) VALUES ({', '.join('?' * 18)})",
             (
-                note.key, note.version, note.mtime, note.folder, note.stem, note.title, note.summary,
-                note.status, note.kind, note.area, json.dumps(note.tags), json.dumps(note.paths),
-                note.date, note.updated, note.superseded_by, int(note.valid), note.error, note.size,
+                note.key,
+                note.version,
+                note.mtime,
+                note.folder,
+                note.stem,
+                note.title,
+                note.summary,
+                note.status,
+                note.kind,
+                note.area,
+                json.dumps(note.tags),
+                json.dumps(note.paths),
+                note.date,
+                note.updated,
+                note.superseded_by,
+                int(note.valid),
+                note.error,
+                note.size,
             ),
         )
         self.db.execute(

@@ -57,7 +57,7 @@ async def test_search_returns_rendered_rows(vault: Vault):
 @pytest.mark.anyio
 async def test_write_then_read_round_trips(vault: Vault):
     content = (
-        '---\ntitle: Via MCP\ndate: 2026-08-01\nupdated: 2026-08-01\n'
+        "---\ntitle: Via MCP\ndate: 2026-08-01\nupdated: 2026-08-01\n"
         'tags: [greenhouse]\nstatus: active\narea: "[[greenhouse]]"\n---\n\nKropp.\n'
     )
     async with Client(build_server(vault)) as client:

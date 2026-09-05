@@ -108,7 +108,7 @@ def validate(frontmatter: dict[str, Any], key: str, schema: Schema) -> list[str]
     if folder in schema.area_required_in:
         area = frontmatter.get("area")
         if area is None or str(area).strip() == "":
-            problems.append(f"missing area: notes in {folder}/ must link their system note as area: \"[[stem]]\"")
+            problems.append(f'missing area: notes in {folder}/ must link their system note as area: "[[stem]]"')
         elif not AREA_RE.match(str(area).strip()):
             problems.append(f"area '{area}' must be a wikilink shaped [[stem]]")
 

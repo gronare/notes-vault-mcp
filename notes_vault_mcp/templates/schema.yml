@@ -78,6 +78,7 @@ synonyms:
 log:
   folder: Log
   file_format: "{repo}-log.md"
+  period_format: "{repo}-{period}.md"
   entry_format: "- [{date}] {line} | commits: {commits} | {area}"
 stale_after_days: 30
 search:

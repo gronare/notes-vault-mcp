@@ -212,10 +212,16 @@ notes-vault-mcp serve --transport stdio          # the default
 notes-vault-mcp sync --rebuild                   # drop the index and read every note again
 notes-vault-mcp search "bokning" --limit 5       # the same ranking, from a shell
 notes-vault-mcp changelog greenhouse 2026-08 --repo-path ~/projects/greenhouse
+notes-vault-mcp changelog greenhouse 2026-08 --repo-path ~/projects/greenhouse --write
+notes-vault-mcp changelog --all                  # this month (and last month during its first week)
 ```
 
-`changelog` prints the log lines, the git commits grouped by day, and the notes dated inside the
-period. It writes nothing; it is input for an agent compiling a month page.
+`changelog` prints the log lines, the git commits grouped by day, and the repo's notes dated inside
+the period. With `--write` it keeps that as a period page, `Log/<repo>-<period>.md`, between the
+markers `<!-- changelog:generated -->` and `<!-- /changelog:generated -->`; prose above the markers
+(a summary written by an agent at month end) is left alone, and the page's status follows the
+calendar. `--all` does it for every repo the session-start hook has seen on this machine, and the
+stop hook runs that once a day, so the pages stay current without a cron.
 
 ## HTTP transport
 

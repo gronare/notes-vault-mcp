@@ -65,6 +65,13 @@ class Schema:
         return f"{self.log_folder}/{self.log_file_format.format(repo=repo)}"
 
     @property
+    def period_file_format(self) -> str:
+        return str((self.data.get("log") or {}).get("period_format", "{repo}-{period}.md"))
+
+    def period_key(self, repo: str, period: str) -> str:
+        return f"{self.log_folder}/{self.period_file_format.format(repo=repo, period=period)}"
+
+    @property
     def log_entry_format(self) -> str:
         return str((self.data.get("log") or {}).get("entry_format", "- [{date}] {line} | commits: {commits} | {area}"))
 
