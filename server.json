@@ -1,0 +1,103 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.gronare/notes-vault-mcp",
+  "title": "Notes Vault",
+  "description": "Indexed search, schema-checked writes and session hooks for a markdown notes vault",
+  "version": "0.2.0",
+  "repository": {
+    "url": "https://github.com/gronare/notes-vault-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/gronare/notes-vault-mcp",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "notes-vault-mcp",
+      "version": "0.2.0",
+      "runtimeHint": "uvx",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "VAULT_PATH",
+          "description": "Directory holding the vault. Set this or the four S3_* variables.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "filepath"
+        },
+        {
+          "name": "S3_ENDPOINT",
+          "description": "S3 or MinIO endpoint URL holding the vault",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "S3_ACCESS_KEY",
+          "description": "Access key for the vault bucket",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "S3_SECRET_KEY",
+          "description": "Secret key for the vault bucket",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "S3_BUCKET",
+          "description": "Bucket holding the vault",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "S3_PREFIX",
+          "description": "Key prefix inside the bucket",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "S3_REGION",
+          "description": "Region for the vault bucket",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "us-east-1"
+        },
+        {
+          "name": "VAULT_CACHE_DIR",
+          "description": "Where the SQLite index lives",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "filepath",
+          "default": "~/.cache/notes-vault-mcp"
+        },
+        {
+          "name": "VAULT_SCHEMA",
+          "description": "Local schema file overriding the one in the vault",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "filepath"
+        },
+        {
+          "name": "VAULT_TOKEN",
+          "description": "Bearer token required by the streamable HTTP transport",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "VAULT_STOP_HOOK",
+          "description": "Set to off to disable the stop hook",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

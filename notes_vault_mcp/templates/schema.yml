@@ -1,0 +1,89 @@
+version: 1
+language: sv
+folders:
+  Areas:     { kind: system,    weight: 3.0, description: "En levande not per system eller delsystem. Bara nuläge. Grafens nav." }
+  Resources: { kind: reference, weight: 2.0, description: "Fällor, how-tos och beslut med skäl. Skrivs en gång, gäller tills superseded_by." }
+  Projects:  { kind: task,      weight: 1.0, description: "Öppet arbete som spänner över sessioner. Stängs med close." }
+  Log:       { kind: log,       weight: 1.0, description: "Append-only logg per repo och kompilerade månadssidor." }
+  Archive:   { kind: archive,   weight: 0.3, searched: false, description: "Historik. Söks bara på begäran." }
+frontmatter:
+  required: [title, date, updated, tags, status]
+  optional: [kind, area, summary, path, superseded_by]
+  area_required_in: [Projects, Resources, Log]
+  status_values: [draft, active, complete, superseded]
+  kind_values: [system, task, trap, howto, decision, reference, log]
+tags:
+  strict: false
+  vocabulary:
+    - greenhouse
+    - stomme
+    - stomme-addons
+    - stomme-themes
+    - stomme-cms-gateway
+    - gronare
+    - homelab
+    - dotfiles
+    - booking
+    - portal
+    - motor
+    - fleet
+    - cms
+    - themes
+    - addons
+    - ci
+    - deploy
+    - backup
+    - dns
+    - domain
+    - mail
+    - villkor
+    - avtal
+    - fakturering
+    - dac7
+    - stripe
+    - security
+    - gdpr
+    - ui
+    - design
+    - astro
+    - sveltia
+    - cloudflare
+    - k3s
+    - proxmox
+    - home-assistant
+    - mcp
+    - claude
+    - obsidian
+    - tests
+    - log
+synonyms:
+  - [bokning, booking]
+  - [avbokning, cancellation]
+  - [utcheckning, checkout]
+  - [villkor, terms]
+  - [avtal, contract]
+  - [fakturering, billing, invoicing, faktura, invoice]
+  - [tema, teman, theme, themes]
+  - [tillägg, addon, addons]
+  - [motor, engine]
+  - [flotta, fleet]
+  - [sajt, site]
+  - [kund, customer]
+  - [domän, domain]
+  - [mejl, mail, email]
+  - [körning, run]
+  - [översyn, review]
+  - [gäst, guest]
+  - [medlem, member]
+log:
+  folder: Log
+  file_format: "{repo}-log.md"
+  entry_format: "- [{date}] {line} | commits: {commits} | {area}"
+stale_after_days: 30
+search:
+  default_limit: 15
+  recency_half_life_days: 90
+  title_weight: 10.0
+  summary_weight: 5.0
+  tags_weight: 3.0
+  body_weight: 1.0

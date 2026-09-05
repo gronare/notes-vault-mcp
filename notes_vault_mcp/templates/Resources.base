@@ -1,0 +1,22 @@
+filters:
+  and:
+    - file.inFolder("Resources")
+    - 'file.ext == "md"'
+properties:
+  file.name:
+    displayName: "Note"
+  kind:
+    displayName: "Kind"
+views:
+  - type: table
+    name: "By kind"
+    groupBy:
+      property: kind
+      direction: ASC
+    order:
+      - file.name
+      - area
+      - updated
+    sort:
+      - property: updated
+        direction: DESC

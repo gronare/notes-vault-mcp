@@ -1,0 +1,19 @@
+filters:
+  and:
+    - file.inFolder("Areas")
+    - 'file.ext == "md"'
+properties:
+  file.name:
+    displayName: "System"
+  updated:
+    displayName: "Updated"
+views:
+  - type: table
+    name: "Systems"
+    order:
+      - file.name
+      - tags
+      - updated
+    sort:
+      - property: updated
+        direction: DESC

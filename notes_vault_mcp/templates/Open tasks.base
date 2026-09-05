@@ -1,0 +1,26 @@
+filters:
+  and:
+    - file.inFolder("Projects")
+    - 'file.ext == "md"'
+    - or:
+        - 'status == "active"'
+        - 'status == "draft"'
+formulas:
+  age: 'if(updated, (today() - date(updated)).days, "")'
+properties:
+  file.name:
+    displayName: "Note"
+  formula.age:
+    displayName: "Age (days)"
+views:
+  - type: table
+    name: "Open"
+    order:
+      - file.name
+      - area
+      - updated
+      - formula.age
+      - tags
+    sort:
+      - property: updated
+        direction: DESC
