@@ -15,6 +15,8 @@ TOOL_NAMES = {
     "delete_file",
     "list_files",
     "close",
+    "backlog_add",
+    "backlog",
     "log_append",
     "context",
     "lint",
@@ -44,7 +46,7 @@ async def test_every_tool_description_states_its_cost(vault: Vault):
 async def test_the_instructions_carry_the_schema(vault: Vault):
     server = build_server(vault)
     assert "Areas/" in server.instructions
-    assert "status is one of: draft, active, complete, superseded" in server.instructions
+    assert "status is one of: draft, active, backlog, complete, superseded" in server.instructions
 
 
 @pytest.mark.anyio

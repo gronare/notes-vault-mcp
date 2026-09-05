@@ -12,7 +12,7 @@ from notes_vault_mcp.search import render, search
 from notes_vault_mcp.server import run_http, run_stdio
 from notes_vault_mcp.vault import open_vault
 
-TEMPLATES = ("schema.yml", "Areas.base", "Open tasks.base", "Resources.base")
+TEMPLATES = ("schema.yml", "Areas.base", "Open tasks.base", "Resources.base", "Backlog.base")
 SCHEMA_TARGET = ".vault/schema.yml"
 
 
@@ -112,6 +112,13 @@ def command_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_backlog(args: argparse.Namespace) -> int:
+    vault = open_vault()
+    vault.index.sync()
+    print(notes.render_backlog(notes.backlog(vault, area=args.area, priority=args.priority)))
+    return 0
+
+
 def command_search(args: argparse.Namespace) -> int:
     vault = open_vault()
     vault.index.sync()
@@ -155,6 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
     sync = sub.add_parser("sync", help="refresh the index")
     sync.add_argument("--rebuild", action="store_true", help="drop the index and read every note again")
     sync.set_defaults(func=command_sync)
+
+    queue = sub.add_parser("backlog", help="list the backlog, sorted by priority then age")
+    queue.add_argument("--area", help="a system note stem, or a family such as greenhouse")
+    queue.add_argument("--priority", help="urgent, high, medium or low")
+    queue.set_defaults(func=command_backlog)
 
     find = sub.add_parser("search", help="search the index from the shell")
     find.add_argument("query")

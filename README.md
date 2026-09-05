@@ -223,6 +223,20 @@ markers `<!-- changelog:generated -->` and `<!-- /changelog:generated -->`; pros
 calendar. `--all` does it for every repo the session-start hook has seen on this machine, and the
 stop hook runs that once a day, so the pages stay current without a cron.
 
+## Backlog
+
+```sh
+notes-vault-mcp backlog --area greenhouse --priority high
+```
+
+A backlog item is a task note with `status: backlog`, an `area`, a one-line `summary`, an optional
+`priority` (`urgent`, `high`, `medium`, `low`) and an optional `source` (who said it and when, or a
+sha). `backlog_add` files one from a conversation the moment something is deferred; `backlog` lists
+them by priority then age, filtered by area or family; `context` shows the ones relevant to the
+current repo apart from the open tasks. Picking an item up is setting its status to `active`;
+finishing it is `close`. Lint leaves backlog notes alone however old they get, and flags a
+`complete` note that was never closed. `init` writes `Backlog.base` next to the other Obsidian bases.
+
 ## HTTP transport
 
 ```sh

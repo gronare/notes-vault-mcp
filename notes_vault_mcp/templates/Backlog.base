@@ -1,0 +1,62 @@
+filters:
+  and:
+    - file.inFolder("Projects")
+    - file.ext == "md"
+    - status == "backlog"
+formulas:
+  rank: if(priority == "urgent", 1, if(priority == "high", 2, if(priority == "medium", 3, if(priority == "low", 4, 5))))
+  age: if(updated, (today() - date(updated)).days, "")
+properties:
+  file.name:
+    displayName: Not
+  note.summary:
+    displayName: Vad
+  note.priority:
+    displayName: Prioritet
+  note.area:
+    displayName: Område
+  note.source:
+    displayName: Källa
+  note.updated:
+    displayName: Uppdaterad
+  formula.age:
+    displayName: Dagar
+views:
+  - type: table
+    name: Per prioritet
+    order:
+      - file.name
+      - priority
+      - area
+      - summary
+      - source
+      - formula.age
+    sort:
+      - property: formula.rank
+        direction: ASC
+      - property: updated
+        direction: DESC
+  - type: table
+    name: Per område
+    groupBy:
+      property: area
+      direction: ASC
+    order:
+      - file.name
+      - priority
+      - summary
+      - formula.age
+    sort:
+      - property: formula.rank
+        direction: ASC
+  - type: table
+    name: Nyast
+    order:
+      - file.name
+      - priority
+      - area
+      - summary
+      - updated
+    sort:
+      - property: updated
+        direction: DESC

@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS notes (
   key TEXT PRIMARY KEY, version TEXT, mtime REAL, folder TEXT, stem TEXT,
   title TEXT, summary TEXT, status TEXT, kind TEXT, area TEXT,
   tags TEXT, paths TEXT, date TEXT, updated TEXT, superseded_by TEXT,
-  valid INT, error TEXT, size INT
+  valid INT, error TEXT, size INT, priority TEXT, source TEXT
 );
 CREATE INDEX IF NOT EXISTS notes_folder ON notes(folder);
 CREATE INDEX IF NOT EXISTS notes_stem ON notes(stem);
@@ -40,8 +40,9 @@ CREATE TABLE IF NOT EXISTS repos (repo TEXT PRIMARY KEY, root TEXT, seen_at TEXT
 
 NOTE_COLUMNS = (
     "key, version, mtime, folder, stem, title, summary, status, kind, area, "
-    "tags, paths, date, updated, superseded_by, valid, error, size"
+    "tags, paths, date, updated, superseded_by, valid, error, size, priority, source"
 )
+ADDED_COLUMNS = ("priority", "source")
 
 
 @dataclass
@@ -64,6 +65,8 @@ class Note:
     valid: bool = True
     error: str = ""
     size: int = 0
+    priority: str = ""
+    source: str = ""
 
 
 def stem_of(key: str) -> str:
@@ -130,6 +133,8 @@ def note_from_text(key: str, text: str, version: str, mtime: float, size: int) -
     note.date = _as_text(frontmatter.get("date"))
     note.updated = _as_text(frontmatter.get("updated"))
     note.superseded_by = _as_text(frontmatter.get("superseded_by"))
+    note.priority = _as_text(frontmatter.get("priority"))
+    note.source = _as_text(frontmatter.get("source"))
     return note, body
 
 
@@ -153,6 +158,8 @@ def _row_to_note(row: sqlite3.Row) -> Note:
         valid=bool(row["valid"]),
         error=row["error"] or "",
         size=row["size"] or 0,
+        priority=row["priority"] or "",
+        source=row["source"] or "",
     )
 
 
@@ -166,6 +173,12 @@ class Index:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=5000")
         self.db.executescript(SCHEMA_SQL)
+        present = {row["name"] for row in self.db.execute("PRAGMA table_info(notes)")}
+        for column in ADDED_COLUMNS:
+            if column not in present:
+                self.db.execute(f"ALTER TABLE notes ADD COLUMN {column} TEXT")
+                self.db.execute("DELETE FROM notes")
+                self.db.execute("DELETE FROM notes_fts")
         self.db.commit()
 
     def close(self) -> None:
@@ -194,7 +207,7 @@ class Index:
         note, body = note_from_text(key, text, version, mtime, size)
         self.remove(key)
         self.db.execute(
-            f"INSERT INTO notes ({NOTE_COLUMNS}) VALUES ({', '.join('?' * 18)})",
+            f"INSERT INTO notes ({NOTE_COLUMNS}) VALUES ({', '.join('?' * 20)})",
             (
                 note.key,
                 note.version,
@@ -214,6 +227,8 @@ class Index:
                 int(note.valid),
                 note.error,
                 note.size,
+                note.priority,
+                note.source,
             ),
         )
         self.db.execute(

@@ -123,6 +123,28 @@ def build_server(vault: Vault) -> MCPServer:
         return run(lambda: f"Closed: {notes.close(vault, path, merged_into=merged_into, status=status)}")
 
     @server.tool(
+        name="backlog_add",
+        description=(
+            "WRITE — files an idea as a backlog note in the task folder: title, area (stem or [[stem]]), "
+            "one line saying what and why, optional priority (urgent, high, medium, low) and source (who "
+            "said it and when, or a sha). Call it the moment something is deferred, in so many words or in "
+            "passing; picking the idea up later is setting its status to active."
+        ),
+    )
+    def backlog_add(title: str, area: str, line: str, priority: str | None = None, source: str | None = None) -> str:
+        return run(lambda: f"Filed: {notes.backlog_add(vault, title, area, line, priority=priority, source=source)}")
+
+    @server.tool(
+        name="backlog",
+        description=(
+            "CHEAP — the backlog sorted by priority then age. Filter by area (a stem, or a family such as "
+            "greenhouse) and by priority."
+        ),
+    )
+    def backlog_tool(area: str | None = None, priority: str | None = None, limit: int = 50) -> str:
+        return run(lambda: notes.render_backlog(notes.backlog(vault, area=area, priority=priority)[:limit]))
+
+    @server.tool(
         name="log_append",
         description=(
             "WRITE — appends one dated line to the repo log, with the commits it produced. Run once at "

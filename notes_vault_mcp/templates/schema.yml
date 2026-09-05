@@ -8,10 +8,11 @@ folders:
   Archive:   { kind: archive,   weight: 0.3, searched: false, description: "Historik. Söks bara på begäran." }
 frontmatter:
   required: [title, date, updated, tags, status]
-  optional: [kind, area, summary, path, superseded_by]
+  optional: [kind, area, summary, path, superseded_by, priority, source]
   area_required_in: [Projects, Resources, Log]
-  status_values: [draft, active, complete, superseded]
+  status_values: [draft, active, backlog, complete, superseded]
   kind_values: [system, task, trap, howto, decision, reference, log]
+  priority_values: [urgent, high, medium, low]
 tags:
   strict: false
   vocabulary:

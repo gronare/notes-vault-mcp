@@ -115,6 +115,10 @@ class Schema:
         return list(self._frontmatter().get("kind_values") or [])
 
     @property
+    def priority_values(self) -> list[str]:
+        return list(self._frontmatter().get("priority_values") or [])
+
+    @property
     def tag_vocabulary(self) -> list[str]:
         return list((self.data.get("tags") or {}).get("vocabulary") or [])
 
@@ -211,6 +215,8 @@ def instructions(schema: Schema) -> str:
     optional = ", ".join(schema.optional_fields)
     statuses = ", ".join(schema.status_values)
     kinds = ", ".join(schema.kind_values)
+    priorities = ", ".join(schema.priority_values)
+    priority_line = f"\n- priority, on a backlog note, is one of: {priorities}" if priorities else ""
     area_folders = ", ".join(schema.area_required_in)
     tags = ", ".join(schema.tag_vocabulary)
     vocabulary = f"Tags come from this vocabulary: {tags}." if tags else "Tags are free-form."
@@ -227,7 +233,7 @@ Frontmatter contract for every note:
 - required: {required}
 - optional: {optional}
 - status is one of: {statuses}
-- kind is one of: {kinds}
+- kind is one of: {kinds}{priority_line}
 - area is a wikilink to the system note, shaped [[stem]], and is required in: {area_folders}
 {vocabulary}{strictness}
 
@@ -241,6 +247,9 @@ Workflow:
 4. At the end of a session, `log_append` one line per repo with the commits it produced.
 5. When work is finished, `close` the note — it moves to the archive and sets the status. A note
    left open is what makes the vault drift.
+6. The moment something is deferred, in so many words or in passing, `backlog_add` it in the same
+   turn: a task note with status backlog, its area, one line and a priority. `backlog` lists them by
+   priority; picking one up is setting its status to active.
 
 `search` excludes the archive and superseded notes unless you ask for them, and says how many it hid.
 """

@@ -104,6 +104,10 @@ def validate(frontmatter: dict[str, Any], key: str, schema: Schema) -> list[str]
     if kind is not None and str(kind) not in schema.kind_values:
         problems.append(f"kind '{kind}' is not one of: {', '.join(schema.kind_values)}")
 
+    priority = frontmatter.get("priority")
+    if priority is not None and schema.priority_values and str(priority) not in schema.priority_values:
+        problems.append(f"priority '{priority}' is not one of: {', '.join(schema.priority_values)}")
+
     folder = folder_of(key)
     if folder in schema.area_required_in:
         area = frontmatter.get("area")

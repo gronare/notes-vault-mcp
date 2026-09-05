@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -16,6 +18,9 @@ CONTEXT_TRUNCATE = 12000
 TRUNCATED_MARKER = "… (truncated, read_file for the rest)"
 LOG_TAIL_LINES = 20
 OPEN_STATUSES = ("active", "draft")
+BACKLOG_STATUS = "backlog"
+PRIORITY_ORDER = ("urgent", "high", "medium", "low")
+SLUG_MAX = 60
 
 
 class ValidationError(Exception):
@@ -166,6 +171,93 @@ def log_append(vault: Vault, repo: str, line: str, commits: tuple[str, ...] = ()
     return f"Logged to {key}:\n{entry}"
 
 
+def priority_rank(value: str) -> int:
+    return PRIORITY_ORDER.index(value) if value in PRIORITY_ORDER else len(PRIORITY_ORDER)
+
+
+def slugify(title: str) -> str:
+    folded = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii").lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
+    return slug[:SLUG_MAX].rstrip("-")
+
+
+def _area_stem(area: str) -> str:
+    return stem_of(area.strip().strip("[]").split("|")[0].strip())
+
+
+def backlog_add(
+    vault: Vault,
+    title: str,
+    area: str,
+    line: str,
+    priority: str | None = None,
+    source: str | None = None,
+) -> str:
+    area_stem = _area_stem(area)
+    if not area_stem:
+        raise ValueError("area is required: the stem of the system note, or [[stem]]")
+    family = area_stem.split("-")[0]
+    slug = slugify(title)
+    stem = slug if slug == family or slug.startswith(f"{family}-") else f"{family}-{slug}"
+    key = _free_key(vault, vault.schema.task_folders[0], stem)
+    frontmatter: dict = {
+        "title": title,
+        "date": today(),
+        "updated": today(),
+        "tags": [family],
+        "status": BACKLOG_STATUS,
+        "kind": "task",
+        "area": f"[[{area_stem}]]",
+        "summary": line,
+    }
+    if priority:
+        frontmatter["priority"] = priority
+    if source:
+        frontmatter["source"] = source
+    problems = validate(frontmatter, key, vault.schema)
+    if problems:
+        raise ValueError("; ".join(problems))
+    text = dump(frontmatter, f"{line}\n")
+    _reindex(vault, key, text, vault.backend.put(key, text))
+    return key
+
+
+def _in_area(note: Note, area: str | None) -> bool:
+    if not area:
+        return True
+    wanted = _area_stem(area)
+    have = _area_stem(note.area)
+    return have == wanted or have.startswith(f"{wanted}-")
+
+
+def backlog(vault: Vault, area: str | None = None, priority: str | None = None) -> list[Note]:
+    task_folders = set(vault.schema.task_folders)
+    rows = [
+        note
+        for note in vault.index.all_notes()
+        if note.valid
+        and note.folder in task_folders
+        and note.status == BACKLOG_STATUS
+        and _in_area(note, area)
+        and (not priority or note.priority == priority)
+    ]
+    rows.sort(key=lambda note: note.updated, reverse=True)
+    rows.sort(key=lambda note: priority_rank(note.priority))
+    return rows
+
+
+def render_backlog(rows: list[Note]) -> str:
+    if not rows:
+        return "The backlog is empty."
+    now = time.time()
+    lines = [
+        f"- {note.key} | {note.title} | {note.priority or '-'} | {note.area or '-'} | "
+        f"{humanize_age(age_days(note, now))}"
+        for note in rows
+    ]
+    return f"{len(rows)} backlog items\n" + "\n".join(lines)
+
+
 def path_overlap(note: Note, target: str | None) -> int:
     if not target:
         return 0
@@ -197,6 +289,8 @@ class ContextBundle:
     system: list[tuple[Note, str]] = field(default_factory=list)
     system_rows: list[Note] = field(default_factory=list)
     tasks: list[Note] = field(default_factory=list)
+    backlog: list[Note] = field(default_factory=list)
+    backlog_total: int = 0
     references: list[Note] = field(default_factory=list)
     log_tail: list[str] = field(default_factory=list)
     repo: str | None = None
@@ -216,6 +310,9 @@ class ContextBundle:
         if self.tasks:
             rows = [_task_row(note, now, self.stale_after_days) for note in self.tasks]
             blocks.append("## open tasks\n" + "\n".join(rows))
+        if self.backlog:
+            rows = [f"{note.key} | {note.title} | {note.priority or '-'}" for note in self.backlog]
+            blocks.append(f"## backlog ({self.backlog_total})\n" + "\n".join(rows))
         if self.references:
             rows = [f"{note.key} | {note.title} | {humanize_age(age_days(note, now))}" for note in self.references]
             blocks.append("## reference notes\n" + "\n".join(rows))
@@ -299,13 +396,22 @@ def context(
         if note.folder in reference_folders
         and (_relevant(note, path, repo) or (needle and needle in f"{note.title} {' '.join(note.tags)}".lower()))
     ]
+    backlog_rows = [
+        note
+        for note in notes
+        if note.folder in task_folders and note.status == BACKLOG_STATUS and _relevant(note, path, repo)
+    ]
     tasks.sort(key=lambda note: note.updated, reverse=True)
     references.sort(key=lambda note: note.updated, reverse=True)
+    backlog_rows.sort(key=lambda note: note.updated, reverse=True)
+    backlog_rows.sort(key=lambda note: priority_rank(note.priority))
     system, system_rows = _system_notes(vault, notes, path, repo)
     return ContextBundle(
         system=system,
         system_rows=system_rows,
         tasks=tasks[:limit],
+        backlog=backlog_rows[:limit],
+        backlog_total=len(backlog_rows),
         references=references[:limit],
         log_tail=_log_tail(vault, repo),
         repo=repo,
@@ -384,6 +490,8 @@ def _lint_lifecycle(vault: Vault, notes: list[Note], findings: Findings) -> None
             days = age_days(note, now)
             if days > vault.schema.stale_after_days:
                 findings.add("stale_active", f"{note.key}: {humanize_age(days)} old, status {note.status}")
+        if note.folder in task_folders and note.status in ("complete", "superseded"):
+            findings.add("done_not_closed", f"{note.key}: status {note.status}, still in {note.folder}/")
         if note.folder == archive and note.status not in ("complete", "superseded"):
             findings.add("archive_status_mismatch", f"{note.key}: status {note.status or '-'}")
         if note.superseded_by:
