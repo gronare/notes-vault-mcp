@@ -126,7 +126,8 @@ def build_server(vault: Vault) -> MCPServer:
         name="log_append",
         description=(
             "WRITE — appends one dated line to the repo log, with the commits it produced. Run once at "
-            "the end of a session per repo. Creates the log note when it is missing."
+            "the end of a session per repo. Creates the log note when it is missing. area is the stem of "
+            "the system note (or [[stem]]); it defaults to the repo name."
         ),
     )
     def log_append(repo: str, line: str, commits: list[str] | None = None, area: str | None = None) -> str:

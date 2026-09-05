@@ -125,6 +125,11 @@ def close(vault: Vault, path: str, merged_into: str | None = None, status: str |
     return destination
 
 
+def _area_link(area: str | None, repo: str) -> str:
+    stem = (area or repo).strip()
+    return stem if stem.startswith("[[") else f"[[{stem}]]"
+
+
 def _new_log(repo: str, area: str | None) -> tuple[dict, str]:
     frontmatter = {
         "title": f"Logg — {repo}",
@@ -133,7 +138,7 @@ def _new_log(repo: str, area: str | None) -> tuple[dict, str]:
         "tags": ["log", repo],
         "status": "active",
         "kind": "log",
-        "area": area or f"[[{repo}]]",
+        "area": _area_link(area, repo),
     }
     return frontmatter, ""
 
@@ -146,7 +151,7 @@ def log_append(vault: Vault, repo: str, line: str, commits: tuple[str, ...] = ()
     except NotFound:
         frontmatter, body = _new_log(repo, area)
     if area:
-        frontmatter["area"] = area
+        frontmatter["area"] = _area_link(area, repo)
     frontmatter["updated"] = today()
     entry = vault.schema.log_entry_format.format(
         date=today(),

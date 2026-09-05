@@ -166,6 +166,13 @@ def test_log_append_takes_an_area_override(vault: Vault):
     assert body_of(vault, "Log/stomme-log.md")[0]["area"] == "[[greenhouse]]"
 
 
+def test_log_append_wraps_a_bare_area_stem_in_a_wikilink(vault: Vault):
+    notes.log_append(vault, "stomme", "rad", area="greenhouse")
+    frontmatter, body = body_of(vault, "Log/stomme-log.md")
+    assert frontmatter["area"] == "[[greenhouse]]"
+    assert body.rstrip().endswith("| [[greenhouse]]")
+
+
 def test_context_returns_the_system_note_in_full(vault: Vault):
     bundle = notes.context(vault, path=GREENHOUSE, repo="greenhouse")
     assert [note.key for note, _ in bundle.system] == ["Areas/greenhouse.md"]
