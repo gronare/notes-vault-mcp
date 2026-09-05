@@ -76,3 +76,15 @@ def test_the_lint_note_carries_a_complete_frontmatter(vault: Vault):
 
 def test_the_repo_log_is_not_a_duplicate_stem(vault: Vault):
     assert not any(entry.startswith("greenhouse:") for entry in groups(vault)["duplicate_stems"])
+
+
+def test_a_note_with_an_area_link_is_connected_not_orphaned(vault: Vault):
+    from notes_vault_mcp import notes
+
+    notes.write(
+        vault,
+        "Resources/lonely-trap.md",
+        "---\ntitle: Ensam fälla\ndate: 2026-07-01\nupdated: 2026-07-01\ntags: [greenhouse]\nstatus: active\n"
+        'kind: trap\narea: "[[greenhouse]]"\n---\n\nIngen länkar hit, men area gör den till en del av grafen.\n',
+    )
+    assert "Resources/lonely-trap.md" not in groups(vault)["orphans"]

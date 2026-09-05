@@ -359,7 +359,7 @@ def _lint_links(vault: Vault, notes: list[Note], findings: Findings) -> None:
     linked = vault.index.inbound_targets()
     ignored = {vault.schema.log_folder, vault.schema.archive_folder}
     for note in notes:
-        if note.folder in ignored:
+        if note.folder in ignored or note.area:
             continue
         if note.stem.lower() not in linked:
             findings.add("orphans", note.key)
