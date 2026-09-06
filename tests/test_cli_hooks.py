@@ -59,6 +59,15 @@ def test_session_start_prints_the_context(vault: Vault, monkeypatch: pytest.Monk
     assert "Projects/greenhouse-fresh.md" in out
 
 
+def test_session_start_ends_with_how_to_read_the_vault(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
+    repo = make_repo(tmp_path / "repos", "greenhouse")
+    feed(monkeypatch, {"cwd": str(repo)})
+    assert main(["hook", "session-start"]) == 0
+    out = capsys.readouterr().out
+    assert out.rstrip().endswith("not a path.")
+    assert "`read_file(path)`" in out and "never look for the vault's files in the filesystem" in out
+
+
 def test_session_start_exits_zero_with_no_backend(monkeypatch: pytest.MonkeyPatch, capsys):
     for name in BACKEND_VARS:
         monkeypatch.delenv(name, raising=False)

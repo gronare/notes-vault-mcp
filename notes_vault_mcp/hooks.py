@@ -16,6 +16,12 @@ from notes_vault_mcp.vault import Vault, open_vault
 STOP_STALE_DAYS = 14
 SHA_PREFIX_LENGTH = 7
 CHANGELOG_META = "changelog_ran_on"
+VAULT_HINT = (
+    "## how to read the vault\n"
+    "The notes above live in the vault, not on disk. Read a note with the vault MCP tool `read_file(path)`, "
+    "find others with `search`, file an idea with `backlog_add`, and never look for the vault's files in the "
+    "filesystem: a wikilink [[stem]] is `search` on the stem, not a path."
+)
 
 __all__ = ["git", "repo_name", "repo_root"]
 
@@ -46,14 +52,14 @@ def session_start_text(vault: Vault, cwd: str) -> str:
     bundle = context(vault, path=cwd, repo=repo)
     blocks = [bundle.render()]
     root = repo_root(cwd)
-    if root is None:
-        return "\n\n".join(blocks)
-    vault.index.remember_repo(repo, str(root))
-    for note, _ in bundle.system:
-        paths = vault_paths_in(note, root)
-        commits = _commits_since(root, note.updated, paths)
-        if commits:
-            blocks.append(f"## commits since the note — {note.key} (updated {note.updated})\n{commits}")
+    if root is not None:
+        vault.index.remember_repo(repo, str(root))
+        for note, _ in bundle.system:
+            paths = vault_paths_in(note, root)
+            commits = _commits_since(root, note.updated, paths)
+            if commits:
+                blocks.append(f"## commits since the note — {note.key} (updated {note.updated})\n{commits}")
+    blocks.append(VAULT_HINT)
     return "\n\n".join(blocks)
 
 

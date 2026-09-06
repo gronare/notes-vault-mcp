@@ -628,7 +628,7 @@ wheels = [
 
 [[package]]
 name = "notes-vault-mcp"
-version = "0.2.4"
+version = "0.2.6"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
