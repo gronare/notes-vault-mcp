@@ -35,6 +35,14 @@ def test_backlog_add_keeps_a_title_that_already_names_the_family(vault: Vault):
     assert key == "Projects/greenhouse-ordbokstrimmen.md"
 
 
+def test_slugify_cuts_a_long_title_at_a_word_boundary():
+    long_title = "iOS-simulator via Xcode när telefonen inte sitter i och skärmen är låst mitt i jobbet"
+    slug = notes.slugify(long_title)
+    assert len(slug) <= notes.SLUG_MAX
+    assert not slug.endswith("-")
+    assert slug == "ios-simulator-via-xcode-nar-telefonen-inte-sitter-i-och"
+
+
 def test_backlog_add_refuses_an_unknown_priority(vault: Vault):
     with pytest.raises(ValueError, match="priority"):
         notes.backlog_add(vault, "Något", "greenhouse", "rad", priority="someday")

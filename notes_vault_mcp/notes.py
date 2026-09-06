@@ -185,7 +185,10 @@ def priority_rank(value: str) -> int:
 def slugify(title: str) -> str:
     folded = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii").lower()
     slug = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")
-    return slug[:SLUG_MAX].rstrip("-")
+    if len(slug) <= SLUG_MAX:
+        return slug
+    head = slug[: SLUG_MAX + 1]
+    return head.rsplit("-", 1)[0] if "-" in head else head[:SLUG_MAX]
 
 
 def _area_stem(area: str) -> str:
