@@ -14,6 +14,9 @@ from notes_vault_mcp.frontmatter import FrontmatterError, folder_of, parse, tags
 
 SYNC_THROTTLE_SECONDS = 20
 FETCH_WORKERS = 16
+BUSY_TIMEOUT_MS = 30000
+OPEN_RETRY_SECONDS = 60
+OPEN_RETRY_PAUSE = 0.5
 SHA_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b")
 WIKILINK_RE = re.compile(r"\[\[([^\]\n]+)\]\]")
 
@@ -168,10 +171,24 @@ class Index:
         self.path = Path(path)
         self.backend = backend
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, check_same_thread=False)
+        self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=BUSY_TIMEOUT_MS / 1000)
         self.db.row_factory = sqlite3.Row
+        self.db.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        self._prepare_with_retry()
+
+    def _prepare_with_retry(self) -> None:
+        deadline = time.time() + OPEN_RETRY_SECONDS
+        while True:
+            try:
+                self._prepare()
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or time.time() >= deadline:
+                    raise
+                time.sleep(OPEN_RETRY_PAUSE)
+
+    def _prepare(self) -> None:
         self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA busy_timeout=5000")
         self.db.executescript(SCHEMA_SQL)
         present = {row["name"] for row in self.db.execute("PRAGMA table_info(notes)")}
         for column in ADDED_COLUMNS:
