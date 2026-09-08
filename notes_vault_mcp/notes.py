@@ -63,7 +63,14 @@ def _with_dates(frontmatter: dict) -> dict:
     return stamped
 
 
+def is_note(path: str) -> bool:
+    return path.endswith(".md") and not path.startswith(".vault/")
+
+
 def write(vault: Vault, path: str, content: str, expected_etag: str | None = None) -> str:
+    if not is_note(path):
+        version = vault.backend.put(path, content, expected_version=expected_etag)
+        return f"Written: {path}\netag: {version}"
     frontmatter, body = parse(content)
     stamped = _with_dates(frontmatter)
     problems = validate(stamped, path, vault.schema)

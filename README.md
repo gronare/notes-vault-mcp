@@ -158,7 +158,7 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 | `list_files` | cheap | Paths only. |
 | `read_file` | moderate | One note, prefixed with `etag: <version>`. A superseded note carries a warning callout. |
 | `lint` | moderate | Reads every note and reports drift. |
-| `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. |
+| `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. Files that are not notes (`.vault/schema.yml`, `.base` views) are stored verbatim. |
 | `append_file` | write | Appends and bumps `updated`. Creates the note when missing. |
 | `close` | write | Sets status complete (or superseded, with `superseded_by`, when `merged_into` is given) and moves the note into the archive. |
 | `log_append` | write | One dated line in the repo log, with the commits it produced. Creates the log when missing. |
@@ -188,9 +188,11 @@ returned — the commits touching that note's `path` since the note was last upd
 answer to "is this note still true?" before the agent believes it.
 
 `stop` blocks the end of a session that left work unrecorded: commits from the last 24 hours whose
-sha does not appear in the repo log, and open task notes older than 14 days. It returns
-`{"decision": "block", "reason": ...}`, or nothing at all when the vault is up to date. Set
-`VAULT_STOP_HOOK=off` to silence it.
+sha does not appear in the repo log, and open task notes older than 14 days that the session read or
+wrote (found through the vault tool calls in the session transcript). It returns
+`{"decision": "block", "reason": ...}`, or nothing at all when the vault is up to date. Stale notes
+the session did not touch are reported as a `systemMessage` warning instead, so old work elsewhere
+in the repo does not stop the session at hand. Set `VAULT_STOP_HOOK=off` to silence it.
 
 ```json
 {

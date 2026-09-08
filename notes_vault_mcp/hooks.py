@@ -97,7 +97,7 @@ def unlogged_commits(vault: Vault, root: Path, repo: str) -> list[tuple[str, str
     return [(sha, subject) for sha, subject in _recent_commits(root) if sha not in logged]
 
 
-def stale_open_notes(vault: Vault, repo: str, path: str) -> list[str]:
+def stale_open_notes(vault: Vault, repo: str, path: str) -> list[tuple[str, str]]:
     now = time.time()
     task_folders = set(vault.schema.task_folders)
     bundle = context(vault, path=path, repo=repo)
@@ -106,8 +106,49 @@ def stale_open_notes(vault: Vault, repo: str, path: str) -> list[str]:
         if note.folder in task_folders and note.status in OPEN_STATUSES:
             days = age_days(note, now)
             if days > STOP_STALE_DAYS:
-                stale.append(f"{note.key} ({humanize_age(days)} old)")
+                stale.append((note.key, f"{note.key} ({humanize_age(days)} old)"))
     return stale
+
+
+def _collect_vault_paths(node: object, touched: set[str]) -> None:
+    if isinstance(node, dict):
+        if node.get("type") == "tool_use" and "vault" in str(node.get("name", "")):
+            arguments = node.get("input") or {}
+            for key in ("path", "source", "dest"):
+                value = arguments.get(key) if isinstance(arguments, dict) else None
+                if isinstance(value, str):
+                    touched.add(value)
+        for value in node.values():
+            _collect_vault_paths(value, touched)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_vault_paths(value, touched)
+
+
+def touched_notes(transcript_path: str | None) -> set[str]:
+    touched: set[str] = set()
+    if not transcript_path:
+        return touched
+    path = Path(transcript_path)
+    if not path.is_file():
+        return touched
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if "tool_use" not in line or "vault" not in line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            _collect_vault_paths(entry, touched)
+    return touched
+
+
+def _stale_warning(stale: list[str]) -> str:
+    return (
+        f"vault: {len(stale)} open task notes older than {STOP_STALE_DAYS} days were not touched this "
+        "session: " + ", ".join(stale) + ". Close them, or say in them what is still open, when you next work on them."
+    )
 
 
 def _reason(commits: list[tuple[str, str]], stale: list[str], repo: str) -> str:
@@ -150,6 +191,13 @@ def stop(raw: str) -> str | None:
         stale = stale_open_notes(vault, repo, cwd)
     finally:
         vault.close()
-    if not commits and not stale:
-        return None
-    return json.dumps({"decision": "block", "reason": _reason(commits, stale, repo)})
+    touched = touched_notes(data.get("transcript_path"))
+    blocking = [label for key, label in stale if key in touched]
+    untouched = [label for key, label in stale if key not in touched]
+    payload: dict[str, str] = {}
+    if commits or blocking:
+        payload["decision"] = "block"
+        payload["reason"] = _reason(commits, blocking, repo)
+    if untouched:
+        payload["systemMessage"] = _stale_warning(untouched)
+    return json.dumps(payload) if payload else None

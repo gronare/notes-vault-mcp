@@ -70,6 +70,20 @@ async def test_write_then_read_round_trips(vault: Vault):
 
 
 @pytest.mark.anyio
+async def test_write_file_stores_the_schema_and_bases_verbatim(vault: Vault):
+    schema = "version: 1\nfolders:\n  Areas: { kind: system }\n"
+    base = "views:\n  - type: table\n    name: Areas\n"
+    async with Client(build_server(vault)) as client:
+        written = await text_of(client, "write_file", {"path": ".vault/schema.yml", "content": schema})
+        await text_of(client, "write_file", {"path": "Areas.base", "content": base})
+        read_schema = await text_of(client, "read_file", {"path": ".vault/schema.yml"})
+        read_base = await text_of(client, "read_file", {"path": "Areas.base"})
+    assert written.startswith("Written: .vault/schema.yml\netag: ")
+    assert read_schema.split("\n", 1)[1] == schema
+    assert read_base.split("\n", 1)[1] == base
+
+
+@pytest.mark.anyio
 async def test_a_rejected_write_reports_the_problem(vault: Vault):
     content = "---\ntitle: Utan area\ndate: 2026-08-01\nupdated: 2026-08-01\ntags: [x]\nstatus: active\n---\n\nKropp.\n"
     async with Client(build_server(vault)) as client:
