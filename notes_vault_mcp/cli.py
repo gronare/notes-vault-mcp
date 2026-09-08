@@ -7,7 +7,8 @@ from importlib import resources
 from pathlib import Path
 
 from notes_vault_mcp import changelog, hooks, notes
-from notes_vault_mcp.config import ConfigError, env
+from notes_vault_mcp.auth import auth_config
+from notes_vault_mcp.config import ConfigError
 from notes_vault_mcp.search import render, search
 from notes_vault_mcp.server import run_http, run_stdio
 from notes_vault_mcp.vault import open_vault
@@ -27,11 +28,7 @@ def _target_key(name: str) -> str:
 def command_serve(args: argparse.Namespace) -> int:
     vault = open_vault()
     if args.transport == "http":
-        token = env("VAULT_TOKEN")
-        if not token:
-            print("notes-vault-mcp: --transport http needs VAULT_TOKEN set", file=sys.stderr)
-            return 2
-        run_http(vault, args.host, args.port, token)
+        run_http(vault, args.host, args.port, auth_config(args.auth))
     else:
         run_stdio(vault)
     return 0
@@ -112,6 +109,18 @@ def command_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_owner(args: argparse.Namespace) -> int:
+    from notes_vault_mcp.auth import builtin
+
+    return builtin.command_owner(args)
+
+
+def command_tokens(args: argparse.Namespace) -> int:
+    from notes_vault_mcp.auth import builtin
+
+    return builtin.command_tokens(args)
+
+
 def command_backlog(args: argparse.Namespace) -> int:
     vault = open_vault()
     vault.index.sync()
@@ -137,6 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--transport", choices=("stdio", "http"), default="stdio")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument(
+        "--auth",
+        choices=("bearer", "oidc", "builtin"),
+        default="bearer",
+        help="http only: a static VAULT_TOKEN, an identity provider (VAULT_OIDC_ISSUER), or the built-in owner login",
+    )
     serve.set_defaults(func=command_serve)
 
     init = sub.add_parser("init", help="write the schema and the Obsidian bases into the vault")
@@ -162,6 +177,19 @@ def build_parser() -> argparse.ArgumentParser:
     sync = sub.add_parser("sync", help="refresh the index")
     sync.add_argument("--rebuild", action="store_true", help="drop the index and read every note again")
     sync.set_defaults(func=command_sync)
+
+    owner = sub.add_parser("owner", help="the built-in login's owner (--auth builtin)")
+    owner_sub = owner.add_subparsers(dest="owner_command", required=True)
+    set_password = owner_sub.add_parser("set-password", help="set or replace the owner's password")
+    set_password.add_argument("--password", help="read from the terminal when omitted")
+    set_password.set_defaults(func=command_owner)
+
+    tokens = sub.add_parser("tokens", help="the clients the built-in login has authorized")
+    tokens_sub = tokens.add_subparsers(dest="tokens_command", required=True)
+    tokens_sub.add_parser("list", help="list authorized clients and their tokens").set_defaults(func=command_tokens)
+    revoke = tokens_sub.add_parser("revoke", help="revoke a client's tokens")
+    revoke.add_argument("client_id")
+    revoke.set_defaults(func=command_tokens)
 
     queue = sub.add_parser("backlog", help="list the backlog, sorted by priority then age")
     queue.add_argument("--area", help="a system note stem, or a family such as greenhouse")

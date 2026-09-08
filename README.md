@@ -82,7 +82,7 @@ passes its user config. The bare name wins when both are set.
 | `S3_REGION` | no | Region, default `us-east-1`. |
 | `VAULT_CACHE_DIR` | no | Where the index lives, default `~/.cache/notes-vault-mcp`. |
 | `VAULT_SCHEMA` | no | Local path to a schema file, overriding the one in the vault. |
-| `VAULT_TOKEN` | for HTTP | Bearer token. Required by `--transport http`. |
+| `VAULT_TOKEN` | for `--auth bearer` | Static bearer token for the LAN mode of `--transport http`. |
 | `VAULT_STOP_HOOK` | no | `off` disables the stop hook. |
 
 Set `VAULT_PATH` **or** the four `S3_*` variables. With neither, the server exits with one line
@@ -245,9 +245,142 @@ finishing it is `close`. Lint leaves backlog notes alone however old they get, a
 VAULT_TOKEN=$(openssl rand -hex 32) notes-vault-mcp serve --transport http --host 0.0.0.0 --port 8765
 ```
 
-Streamable HTTP on `/mcp`. Every request must carry `Authorization: Bearer $VAULT_TOKEN`; anything
+Streamable HTTP on `/mcp`, with three ways to authenticate: `--auth bearer` (the default),
+`--auth oidc` and `--auth builtin`.
+
+`bearer` is the LAN mode. Every request must carry `Authorization: Bearer $VAULT_TOKEN`; anything
 else gets 401 before it reaches the server. `VAULT_TOKEN` is mandatory in this mode — the command
-refuses to start without it.
+refuses to start without it. It is a single token with full access, and claude.ai cannot use it.
+
+The other two speak OAuth, which is what a Claude connector needs. See
+[Remote: claude.ai, Claude Desktop and mobile](#remote-claudeai-claude-desktop-and-mobile).
+
+## Remote: claude.ai, Claude Desktop and mobile
+
+Run the server over HTTPS with `--auth builtin` or `--auth oidc` and claude.ai can add it as a
+custom connector. Connect it once on the web and the same connector appears in Claude Desktop and
+in the mobile app.
+
+One server instance serves one vault.
+
+### Prerequisites
+
+- A vault: an S3-compatible bucket with a key scoped to it, or a folder on the host.
+- Docker, or `uv` on the host.
+- A domain pointing at the machine, with TLS in front of the server. The examples under `deploy/`
+  put Caddy there, which fetches the certificate itself.
+- For `--auth oidc`: an OpenID Connect provider you already run.
+
+### The two modes
+
+| | `--auth builtin` | `--auth oidc` |
+| --- | --- | --- |
+| Who logs in | one owner, against a password this server holds | anyone the provider admits |
+| Client registration | dynamic, nothing to configure in claude.ai | dynamic when the provider supports it, otherwise a client id and secret pasted into claude.ai |
+| Read-only clients | two checkboxes on the login page | group membership |
+| State on disk | `auth.sqlite` under `VAULT_AUTH_DIR` | none |
+
+### Environment
+
+| Variable | Mode | Meaning |
+| --- | --- | --- |
+| `VAULT_PUBLIC_URL` | oidc, builtin | Required. The https address clients reach, path included when the server is not at the root. No default: the server refuses to start without it, and refuses anything that is not `https://` (or `http://localhost` for a local trial). |
+| `VAULT_AUTH_DIR` | builtin | Where `auth.sqlite` lives — the owner's password hash, the registered clients, the hashed tokens. Default `~/.cache/notes-vault-mcp/auth`. |
+| `VAULT_OIDC_ISSUER` | oidc | Required. The provider's issuer URL. |
+| `VAULT_OIDC_AUDIENCE` | oidc | The client id the provider puts in `aud`. Checked when set, ignored when empty. |
+| `VAULT_OIDC_READ_GROUP` | oidc | Group granting `vault:read`. Default `vault`. |
+| `VAULT_OIDC_WRITE_GROUP` | oidc | Group granting `vault:read` and `vault:write`. Default `vault-writers`. |
+| `VAULT_TOKEN` | bearer | The static token. |
+| `VAULT_CACHE_DIR` | all | Where the index lives. Default `~/.cache/notes-vault-mcp`. |
+| `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | all | The vault, unless `VAULT_PATH` names a local folder. |
+
+The MCP endpoint is `VAULT_PUBLIC_URL` + `/mcp`. That is the URL you paste into claude.ai.
+
+### Scopes
+
+- `vault:read` — `search`, `read_file`, `list_files`, `context`, `lint`, `backlog`.
+- `vault:write` — `write_file`, `append_file`, `move_file`, `delete_file`, `close`, `log_append`,
+  `backlog_add`.
+
+A write tool called with a read-only token fails with an error saying the token may only read the
+vault, rather than half-writing or silently doing nothing.
+
+### Built-in login, from zero
+
+```sh
+cd deploy/caddy-builtin
+cp .env.example .env
+$EDITOR .env
+docker compose up -d
+docker compose exec vault notes-vault-mcp owner set-password
+```
+
+Then, in claude.ai: Settings → Connectors → Add custom connector → the `/mcp` URL, e.g.
+`https://vault.example.com/mcp`. Nothing else is needed: the server registers the client itself.
+The browser lands on the server's login page, which asks for the owner password and shows two
+checkboxes, read and write. Clear write to hand out a read-only connector.
+
+What has been connected, and how to disconnect it:
+
+```sh
+docker compose exec vault notes-vault-mcp tokens list
+docker compose exec vault notes-vault-mcp tokens revoke <client_id>
+```
+
+The password hash and the tokens live in `auth.sqlite` in the `vault-data` volume. Back that volume
+up; losing it means every client has to connect again.
+
+### OIDC, from zero
+
+```sh
+cd deploy/caddy-oidc
+cp .env.example .env
+$EDITOR .env
+docker compose up -d
+```
+
+The server is a resource server here: it validates the provider's access tokens and never sees a
+password. A user in the write group gets `vault:read` and `vault:write`, a user in the read group
+only `vault:read`, and anyone in neither is refused.
+
+Add the connector in claude.ai the same way. With a provider that supports dynamic client
+registration you are done. With one that does not (Pocket ID, Authentik), register the client in
+the provider first and paste its client id and secret under the connector's Advanced settings; the
+redirect URI to allow in the provider is the one claude.ai shows in that dialog.
+
+### Pocket ID
+
+1. Create the groups `vault` and `vault-writers`, and put users in them.
+2. Create an OIDC client named `claude.ai` with claude.ai's callback URL as its redirect URI.
+3. Make sure the `groups` claim is included in the access token, not only in the id token.
+4. Set `VAULT_OIDC_ISSUER` to Pocket ID's base URL and `VAULT_OIDC_AUDIENCE` to the client id.
+
+Then paste that client id and secret into the connector's Advanced settings in claude.ai.
+
+### Kubernetes
+
+`deploy/k8s/` holds plain manifests: a Deployment with a PVC mounted at `/data`, a Service, an
+Ingress and an example Secret.
+
+```sh
+cp deploy/k8s/secret.example.yaml secret.yaml
+$EDITOR secret.yaml
+$EDITOR deploy/k8s/ingress.yaml
+kubectl apply -f secret.yaml -f deploy/k8s/deployment.yaml -f deploy/k8s/service.yaml -f deploy/k8s/ingress.yaml
+```
+
+The Deployment runs `--auth builtin`; for OIDC change the `--auth` argument and fill the
+`VAULT_OIDC_*` keys in the Secret. The readiness probe hits
+`/.well-known/oauth-protected-resource/mcp`, the one route that answers without a token in both
+modes; when `VAULT_PUBLIC_URL` carries a path, that path sits in the probe URL too. Set the owner
+password once the pod is up:
+
+```sh
+kubectl exec -it deploy/notes-vault-mcp -- notes-vault-mcp owner set-password
+```
+
+Fill in `ingressClassName` and point `secretName` at a TLS certificate — an existing secret, or one
+cert-manager issues.
 
 ## Development
 

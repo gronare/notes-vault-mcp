@@ -10,4 +10,7 @@ COPY pyproject.toml uv.lock README.md ./
 COPY notes_vault_mcp ./notes_vault_mcp
 RUN uv sync --frozen --no-dev
 
+ENV VAULT_AUTH_DIR=/data/auth VAULT_CACHE_DIR=/data/cache
+VOLUME /data
+
 ENTRYPOINT ["notes-vault-mcp"]

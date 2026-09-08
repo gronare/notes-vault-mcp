@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-import secrets
 from collections.abc import Callable
-from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from notes_vault_mcp import notes
+from notes_vault_mcp.auth import AuthConfig
+from notes_vault_mcp.auth.scopes import ScopeError, require_write
 from notes_vault_mcp.backends import VaultError
 from notes_vault_mcp.frontmatter import FrontmatterError
 from notes_vault_mcp.schema import instructions
 from notes_vault_mcp.search import render, search
 from notes_vault_mcp.vault import Vault, open_vault
 
-EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError)
+EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError, ScopeError)
 
 SEARCH_DESCRIPTION = (
     "CHEAP — start here. Full-text search over the local SQLite index of the vault; it never "
@@ -24,12 +24,16 @@ SEARCH_DESCRIPTION = (
 )
 
 
-def build_server(vault: Vault) -> MCPServer:
-    server = MCPServer("vault", instructions=instructions(vault.schema), version="0.2.0")
+def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
+    from notes_vault_mcp.auth.http import server_auth_kwargs
 
-    def run(action: Callable[[], str], force: bool = False) -> str:
-        vault.index.sync(force=force)
+    server = MCPServer("vault", instructions=instructions(vault.schema), version="0.3.0", **server_auth_kwargs(auth))
+
+    def run(action: Callable[[], str], force: bool = False, write: bool = False) -> str:
         try:
+            if write:
+                require_write()
+            vault.index.sync(force=force)
             return action()
         except EXPECTED_FAILURES as exc:
             raise ToolError(str(exc)) from exc
@@ -87,22 +91,22 @@ def build_server(vault: Vault) -> MCPServer:
         ),
     )
     def write_file(path: str, content: str, expected_etag: str | None = None) -> str:
-        return run(lambda: notes.write(vault, path, content, expected_etag=expected_etag))
+        return run(lambda: notes.write(vault, path, content, expected_etag=expected_etag), write=True)
 
     @server.tool(
         name="append_file",
         description="WRITE — appends to a note and bumps `updated`. Creates the note when it is missing.",
     )
     def append_file(path: str, content: str) -> str:
-        return run(lambda: notes.append(vault, path, content))
+        return run(lambda: notes.append(vault, path, content), write=True)
 
     @server.tool(name="move_file", description="WRITE — moves or renames a note. Use `close` to archive finished work.")
     def move_file(source: str, dest: str) -> str:
-        return run(lambda: notes.move(vault, source, dest))
+        return run(lambda: notes.move(vault, source, dest), write=True)
 
     @server.tool(name="delete_file", description="WRITE — deletes a note for good. Prefer `close`, which keeps it.")
     def delete_file(path: str) -> str:
-        return run(lambda: notes.delete(vault, path))
+        return run(lambda: notes.delete(vault, path), write=True)
 
     @server.tool(
         name="list_files",
@@ -120,7 +124,7 @@ def build_server(vault: Vault) -> MCPServer:
         ),
     )
     def close_tool(path: str, merged_into: str | None = None, status: str | None = None) -> str:
-        return run(lambda: f"Closed: {notes.close(vault, path, merged_into=merged_into, status=status)}")
+        return run(lambda: f"Closed: {notes.close(vault, path, merged_into=merged_into, status=status)}", write=True)
 
     @server.tool(
         name="backlog_add",
@@ -132,7 +136,10 @@ def build_server(vault: Vault) -> MCPServer:
         ),
     )
     def backlog_add(title: str, area: str, line: str, priority: str | None = None, source: str | None = None) -> str:
-        return run(lambda: f"Filed: {notes.backlog_add(vault, title, area, line, priority=priority, source=source)}")
+        return run(
+            lambda: f"Filed: {notes.backlog_add(vault, title, area, line, priority=priority, source=source)}",
+            write=True,
+        )
 
     @server.tool(
         name="backlog",
@@ -153,7 +160,7 @@ def build_server(vault: Vault) -> MCPServer:
         ),
     )
     def log_append(repo: str, line: str, commits: list[str] | None = None, area: str | None = None) -> str:
-        return run(lambda: notes.log_append(vault, repo, line, commits=tuple(commits or ()), area=area))
+        return run(lambda: notes.log_append(vault, repo, line, commits=tuple(commits or ()), area=area), write=True)
 
     @server.tool(
         name="context",
@@ -190,34 +197,16 @@ def _listing(vault: Vault, prefix: str) -> str:
     return "\n".join(keys) if keys else f"No files under '{prefix}'"
 
 
-class BearerToken:
-    def __init__(self, app: Any, token: str) -> None:
-        self.app = app
-        self.token = token
-
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope["type"] != "http" or self._authorized(scope):
-            await self.app(scope, receive, send)
-            return
-        await send({"type": "http.response.start", "status": 401, "headers": [(b"content-type", b"text/plain")]})
-        await send({"type": "http.response.body", "body": b"unauthorized"})
-
-    def _authorized(self, scope: dict) -> bool:
-        for name, value in scope.get("headers", []):
-            if name.lower() == b"authorization":
-                return secrets.compare_digest(value.decode("latin-1"), f"Bearer {self.token}")
-        return False
-
-
 def run_stdio(vault: Vault) -> None:
     build_server(vault).run("stdio")
 
 
-def run_http(vault: Vault, host: str, port: int, token: str) -> None:
+def run_http(vault: Vault, host: str, port: int, auth: AuthConfig) -> None:
     import uvicorn
 
-    app = build_server(vault).streamable_http_app(host=host)
-    uvicorn.run(BearerToken(app, token), host=host, port=port, log_level="info")
+    from notes_vault_mcp.auth.http import build_http_app
+
+    uvicorn.run(build_http_app(vault, auth), host=host, port=port, log_level="info")
 
 
 def create_server() -> MCPServer:

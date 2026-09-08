@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 from mcp.client import Client
 
-from notes_vault_mcp.server import BearerToken, build_server
+from notes_vault_mcp.auth.http import BearerToken
+from notes_vault_mcp.server import build_server
 from notes_vault_mcp.vault import Vault
 
 TOOL_NAMES = {
