@@ -3,48 +3,37 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from importlib import resources
 from pathlib import Path
 
-from notes_vault_mcp import changelog, hooks, notes
+from notes_vault_mcp import changelog, hooks, notes, provision
 from notes_vault_mcp.auth import auth_config
 from notes_vault_mcp.config import ConfigError
 from notes_vault_mcp.search import render, search
 from notes_vault_mcp.server import run_http, run_stdio
 from notes_vault_mcp.vault import open_vault
 
-TEMPLATES = ("schema.yml", "Areas.base", "Open tasks.base", "Resources.base", "Backlog.base")
-SCHEMA_TARGET = ".vault/schema.yml"
-
-
-def template(name: str) -> str:
-    return resources.files("notes_vault_mcp.templates").joinpath(name).read_text(encoding="utf-8")
-
-
-def _target_key(name: str) -> str:
-    return SCHEMA_TARGET if name == "schema.yml" else name
+template = provision.template
 
 
 def command_serve(args: argparse.Namespace) -> int:
-    vault = open_vault()
-    if args.transport == "http":
-        run_http(vault, args.host, args.port, auth_config(args.auth))
-    else:
-        run_stdio(vault)
+    if args.transport != "http":
+        run_stdio(open_vault())
+        return 0
+    auth = auth_config(args.auth)
+    if auth.mode == "forwarded":
+        from notes_vault_mcp.vault import SubjectVaults
+
+        run_http(SubjectVaults(prefix=auth.subject_prefix, dav_url=auth.dav_url), args.host, args.port, auth)
+        return 0
+    run_http(open_vault(), args.host, args.port, auth)
     return 0
 
 
 def command_init(args: argparse.Namespace) -> int:
     vault = open_vault()
-    existing = {entry.key for entry in vault.backend.list()}
-    written = []
-    for name in TEMPLATES:
-        key = _target_key(name)
-        if key in existing and not args.force:
-            print(f"notes-vault-mcp: {key} exists, keeping it (--force overwrites)", file=sys.stderr)
-            continue
-        vault.backend.put(key, template(name))
-        written.append(key)
+    written, kept = provision.initialize(vault.backend, force=args.force)
+    for key in kept:
+        print(f"notes-vault-mcp: {key} exists, keeping it (--force overwrites)", file=sys.stderr)
     for key in written:
         print(f"wrote {key}", file=sys.stderr)
     print(template("claude-md-snippet.md"))
@@ -148,9 +137,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument(
         "--auth",
-        choices=("bearer", "oidc", "builtin"),
+        choices=("bearer", "oidc", "builtin", "forwarded"),
         default="bearer",
-        help="http only: a static VAULT_TOKEN, an identity provider (VAULT_OIDC_ISSUER), or the built-in owner login",
+        help=(
+            "http only: a static VAULT_TOKEN, an identity provider (VAULT_OIDC_ISSUER), the built-in owner login, "
+            "or a signed identity header from a trusted proxy (VAULT_IDENTITY_*), one vault per subject"
+        ),
     )
     serve.set_defaults(func=command_serve)
 

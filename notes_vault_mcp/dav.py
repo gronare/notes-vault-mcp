@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+import base64
+import contextlib
+import mimetypes
+import posixpath
+from datetime import UTC, datetime
+from email.utils import format_datetime
+from urllib.parse import quote, unquote, urlsplit
+from xml.sax.saxutils import escape
+
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.types import Receive, Scope, Send
+
+from notes_vault_mcp.auth.personal import PersonalTokens
+from notes_vault_mcp.backends import Entry, NotFound, VaultBackend
+from notes_vault_mcp.vault import SubjectVaults
+
+ALLOW = "OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY"
+XML = "application/xml; charset=utf-8"
+
+
+def _now() -> datetime:
+    return datetime.now(tz=UTC)
+
+
+def _http_date(moment: datetime) -> str:
+    return format_datetime(moment.astimezone(UTC), usegmt=True)
+
+
+def _content_type(key: str) -> str:
+    if key.endswith(".md"):
+        return "text/markdown; charset=utf-8"
+    return mimetypes.guess_type(key)[0] or "application/octet-stream"
+
+
+def _clean(raw: str) -> str | None:
+    key = unquote(raw).lstrip("/")
+    if key == "":
+        return key
+    segments = key.split("/")
+    body = segments[:-1] if key.endswith("/") else segments
+    if any(segment in ("", ".", "..") or "\\" in segment for segment in body):
+        return None
+    return key
+
+
+class WebDav:
+    # A small WebDAV server over one subject's prefix: what Remotely Save needs, nothing more. The caller
+    # authenticates with the personal token the `obsidian_access` tool minted; the username is informational.
+    def __init__(self, vaults: SubjectVaults, tokens: PersonalTokens, mount: str = "/dav") -> None:
+        self.vaults = vaults
+        self.tokens = tokens
+        self.mount = mount.rstrip("/")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return
+        request = Request(scope, receive)
+        response = await self.handle(request)
+        await response(scope, receive, send)
+
+    async def handle(self, request: Request) -> Response:
+        subject = self._subject(request)
+        if subject is None:
+            return Response("unauthorized", 401, headers={"WWW-Authenticate": 'Basic realm="vault"'})
+        key = self._key(request.scope)
+        if key is None:
+            return Response("forbidden", 403)
+        handler = getattr(self, "do_" + request.method.lower(), None)
+        if handler is None:
+            return Response("method not allowed", 405, headers={"Allow": ALLOW})
+        backend = self.vaults.for_subject(subject).backend
+        try:
+            return await handler(request, backend, key)
+        except NotFound:
+            return Response("not found", 404)
+
+    def _subject(self, request: Request) -> str | None:
+        header = request.headers.get("authorization", "")
+        scheme, _, value = header.partition(" ")
+        if scheme.lower() == "basic":
+            try:
+                decoded = base64.b64decode(value.strip()).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return None
+            _, _, secret = decoded.partition(":")
+            return self.tokens.subject_for(secret)
+        if scheme.lower() == "bearer":
+            return self.tokens.subject_for(value.strip())
+        return None
+
+    def _key(self, scope: Scope) -> str | None:
+        path = scope.get("path", "")
+        root = scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root) :]
+        if self.mount and path.startswith(self.mount):
+            path = path[len(self.mount) :]
+        return _clean(path)
+
+    def _href(self, key: str) -> str:
+        return self.mount + "/" + quote(key)
+
+    # --- resources -------------------------------------------------------------------------------------
+
+    def _lookup(self, backend: VaultBackend, key: str) -> tuple[str, Entry | None] | None:
+        if key == "":
+            return "dir", None
+        base = key.rstrip("/")
+        entries = backend.list_all(base)
+        if not key.endswith("/"):
+            for entry in entries:
+                if entry.key == base:
+                    return "file", entry
+        marker = base + "/"
+        for entry in entries:
+            if entry.key == marker:
+                return "dir", entry
+        if any(entry.key.startswith(marker) for entry in entries):
+            return "dir", None
+        return None
+
+    def _children(self, backend: VaultBackend, folder: str) -> list[tuple[str, Entry | None]]:
+        files: dict[str, Entry] = {}
+        dirs: dict[str, Entry | None] = {}
+        for entry in backend.list_all(folder):
+            rest = entry.key[len(folder) :]
+            if not rest:
+                continue
+            first, sep, more = rest.partition("/")
+            if sep:
+                if not more:
+                    dirs[first] = entry
+                else:
+                    dirs.setdefault(first, None)
+            else:
+                files[first] = entry
+        children: list[tuple[str, Entry | None]] = [(folder + name + "/", dirs[name]) for name in sorted(dirs)]
+        children.extend((folder + name, files[name]) for name in sorted(files))
+        return children
+
+    def _response_xml(self, key: str, entry: Entry | None, is_dir: bool) -> str:
+        href = escape(self._href(key))
+        name = escape(posixpath.basename(key.rstrip("/")) or "/")
+        modified = _http_date(entry.mtime if entry else _now())
+        props = [f"<D:displayname>{name}</D:displayname>", f"<D:getlastmodified>{modified}</D:getlastmodified>"]
+        if is_dir:
+            props.append("<D:resourcetype><D:collection/></D:resourcetype>")
+        else:
+            size = entry.size if entry else 0
+            version = escape(entry.version) if entry else ""
+            props.append("<D:resourcetype/>")
+            props.append(f"<D:getcontentlength>{size}</D:getcontentlength>")
+            props.append(f"<D:getcontenttype>{escape(_content_type(key))}</D:getcontenttype>")
+            props.append(f'<D:getetag>"{version}"</D:getetag>')
+        return (
+            f"<D:response><D:href>{href}</D:href><D:propstat><D:prop>{''.join(props)}</D:prop>"
+            "<D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>"
+        )
+
+    # --- methods ---------------------------------------------------------------------------------------
+
+    async def do_options(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        return Response(status_code=200, headers={"DAV": "1", "Allow": ALLOW, "MS-Author-Via": "DAV"})
+
+    async def do_propfind(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        found = self._lookup(backend, key)
+        if found is None:
+            return Response("not found", 404)
+        kind, entry = found
+        is_dir = kind == "dir"
+        folder = key if key == "" or key.endswith("/") else key + "/"
+        parts = [self._response_xml(folder if is_dir else key, entry, is_dir)]
+        if is_dir and request.headers.get("depth", "1") != "0":
+            parts.extend(
+                self._response_xml(child, child_entry, child.endswith("/"))
+                for child, child_entry in self._children(backend, folder)
+            )
+        body = (
+            '<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:">' + "".join(parts) + "</D:multistatus>"
+        )
+        return Response(body, status_code=207, media_type=XML)
+
+    async def do_head(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        response = await self.do_get(request, backend, key)
+        return Response(
+            status_code=response.status_code, headers=dict(response.headers), media_type=response.media_type
+        )
+
+    async def do_get(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        found = self._lookup(backend, key)
+        if found is None:
+            return Response("not found", 404)
+        kind, entry = found
+        if kind == "dir":
+            return Response("collection", 405, headers={"Allow": "OPTIONS, PROPFIND"})
+        data, version = backend.get_bytes(key)
+        headers = {"ETag": f'"{version}"', "Last-Modified": _http_date(entry.mtime if entry else _now())}
+        return Response(data, status_code=200, headers=headers, media_type=_content_type(key))
+
+    async def do_put(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        if key == "" or key.endswith("/"):
+            return Response("cannot PUT a collection", 405, headers={"Allow": ALLOW})
+        existed = self._lookup(backend, key) is not None
+        data = await request.body()
+        version = backend.put_bytes(key, data, request.headers.get("content-type") or None)
+        return Response(status_code=204 if existed else 201, headers={"ETag": f'"{version}"'})
+
+    async def do_delete(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        found = self._lookup(backend, key)
+        if found is None:
+            return Response("not found", 404)
+        kind, _ = found
+        if kind == "file":
+            backend.delete(key)
+            return Response(status_code=204)
+        self._delete_tree(backend, key.rstrip("/") + "/")
+        return Response(status_code=204)
+
+    def _delete_tree(self, backend: VaultBackend, folder: str) -> None:
+        entries = backend.list_all(folder)
+        for entry in entries:
+            if not entry.is_dir:
+                backend.delete(entry.key)
+        for entry in sorted((entry for entry in entries if entry.is_dir), key=lambda entry: -len(entry.key)):
+            backend.delete(entry.key)
+        if not any(entry.key == folder for entry in entries):
+            with contextlib.suppress(NotFound):
+                backend.delete(folder)
+
+    async def do_mkcol(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        if await request.body():
+            return Response("unsupported media type", 415)
+        if key == "" or self._lookup(backend, key) is not None:
+            return Response("already exists", 405, headers={"Allow": ALLOW})
+        backend.mkdir(key.rstrip("/") + "/")
+        return Response(status_code=201)
+
+    def _destination(self, request: Request) -> str | None:
+        raw = request.headers.get("destination", "")
+        if not raw:
+            return None
+        return self._key({"path": urlsplit(raw).path, "root_path": ""})
+
+    async def do_move(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        return await self._transfer(request, backend, key, copy=False)
+
+    async def do_copy(self, request: Request, backend: VaultBackend, key: str) -> Response:
+        return await self._transfer(request, backend, key, copy=True)
+
+    async def _transfer(self, request: Request, backend: VaultBackend, key: str, copy: bool) -> Response:
+        dest = self._destination(request)
+        if dest is None or dest == "":
+            return Response("bad destination", 400)
+        found = self._lookup(backend, key)
+        if found is None:
+            return Response("not found", 404)
+        kind, _ = found
+        dest_existed = self._lookup(backend, dest) is not None
+        if dest_existed and request.headers.get("overwrite", "T").upper() == "F":
+            return Response("destination exists", 412)
+        if kind == "file":
+            self._transfer_file(backend, key, dest.rstrip("/"), copy)
+        else:
+            source = key.rstrip("/") + "/"
+            target = dest.rstrip("/") + "/"
+            if target.startswith(source):
+                return Response("cannot move a collection into itself", 403)
+            if dest_existed:
+                self._delete_tree(backend, target)
+            self._transfer_tree(backend, source, target, copy)
+        return Response(status_code=204 if dest_existed else 201)
+
+    def _transfer_file(self, backend: VaultBackend, src: str, dst: str, copy: bool) -> None:
+        if copy:
+            data, _ = backend.get_bytes(src)
+            backend.put_bytes(dst, data, _content_type(dst))
+        else:
+            backend.move(src, dst)
+
+    def _transfer_tree(self, backend: VaultBackend, source: str, target: str, copy: bool) -> None:
+        entries = backend.list_all(source)
+        backend.mkdir(target)
+        for entry in entries:
+            rest = entry.key[len(source) :]
+            if entry.is_dir:
+                if rest:
+                    backend.mkdir(target + rest)
+                continue
+            self._transfer_file(backend, entry.key, target + rest, copy)
+        if not copy:
+            self._delete_tree(backend, source)

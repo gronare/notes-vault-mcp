@@ -28,6 +28,10 @@ class Entry:
     mtime: datetime
     size: int
 
+    @property
+    def is_dir(self) -> bool:
+        return self.key.endswith("/")
+
 
 @runtime_checkable
 class VaultBackend(Protocol):
@@ -40,6 +44,15 @@ class VaultBackend(Protocol):
     def delete(self, key: str) -> None: ...
 
     def move(self, src: str, dst: str) -> None: ...
+
+    # The raw side, for WebDAV: every object under a prefix (directories as keys ending in "/"), bytes in and out.
+    def list_all(self, prefix: str = "") -> list[Entry]: ...
+
+    def get_bytes(self, key: str) -> tuple[bytes, str]: ...
+
+    def put_bytes(self, key: str, data: bytes, content_type: str | None = None) -> str: ...
+
+    def mkdir(self, key: str) -> None: ...
 
 
 def is_vault_key(key: str) -> bool:
@@ -66,5 +79,27 @@ def make_backend() -> tuple[VaultBackend, str]:
 
         seed = settings["endpoint"] + settings["bucket"] + settings["prefix"]
         return S3Backend(**settings), vault_id(seed)
+
+    raise ConfigError(NO_BACKEND)
+
+
+def make_subject_backend(subject: str, prefix: str = "") -> tuple[VaultBackend, str]:
+    # One vault per subject under the configured storage: a sub-folder of the local root, or a deeper S3 prefix.
+    from notes_vault_mcp.config import NO_BACKEND, ConfigError, local_root, s3_settings, vault_id
+
+    root = local_root()
+    if root is not None:
+        from notes_vault_mcp.backends.local import LocalBackend
+
+        path = root.joinpath(*(part for part in (prefix.strip("/"), subject) if part))
+        return LocalBackend(path), vault_id(str(path))
+
+    settings = s3_settings()
+    if settings is not None:
+        from notes_vault_mcp.backends.s3 import S3Backend
+
+        combined = "/".join(part for part in (settings["prefix"].strip("/"), prefix.strip("/"), subject) if part)
+        seed = settings["endpoint"] + settings["bucket"] + combined
+        return S3Backend(**{**settings, "prefix": combined}), vault_id(seed)
 
     raise ConfigError(NO_BACKEND)

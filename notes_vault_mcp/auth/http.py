@@ -8,8 +8,8 @@ from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, Re
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-from notes_vault_mcp.auth import READ_SCOPE, SCOPES, AuthConfig
-from notes_vault_mcp.vault import Vault
+from notes_vault_mcp.auth import READ_SCOPE, SCOPES, AuthConfig, auth_dir
+from notes_vault_mcp.vault import Vault, VaultResolver
 
 
 def auth_settings(auth: AuthConfig) -> AuthSettings:
@@ -26,7 +26,7 @@ def auth_settings(auth: AuthConfig) -> AuthSettings:
 
 
 def server_auth_kwargs(auth: AuthConfig | None) -> dict[str, Any]:
-    if auth is None or auth.mode == "bearer":
+    if auth is None or auth.mode in ("bearer", "forwarded"):
         return {}
     if auth.mode == "oidc":
         from notes_vault_mcp.auth.oidc import OidcVerifier
@@ -72,10 +72,12 @@ def transport_security(auth: AuthConfig) -> TransportSecuritySettings | None:
     )
 
 
-def build_http_app(vault: Vault, auth: AuthConfig, host: str = "127.0.0.1") -> Any:
+def build_http_app(vaults: Vault | VaultResolver, auth: AuthConfig, host: str = "127.0.0.1") -> Any:
     from notes_vault_mcp.server import build_server
 
-    server: MCPServer = build_server(vault, auth)
+    if auth.mode == "forwarded":
+        return forwarded_app(vaults, auth, host)
+    server: MCPServer = build_server(vaults, auth)
     if auth.mode == "builtin":
         provider = server._auth_server_provider
         provider.register_routes(server)
@@ -85,3 +87,40 @@ def build_http_app(vault: Vault, auth: AuthConfig, host: str = "127.0.0.1") -> A
     from notes_vault_mcp.auth.prefix import mount_under_prefix
 
     return mount_under_prefix(app, auth, server)
+
+
+def forwarded_app(vaults: Vault | VaultResolver, auth: AuthConfig, host: str) -> Any:
+    # Behind a proxy that authenticates for us: identity comes from a signed header, the transport is stateless
+    # so the proxy's buffered relay needs no session id, and the Host header is whatever the proxy sends.
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.routing import Mount
+
+    from notes_vault_mcp.auth.forwarded import ForwardedIdentity, ForwardedVerifier
+    from notes_vault_mcp.auth.personal import PersonalTokens
+    from notes_vault_mcp.auth.prefix import forwarded_lifespan
+    from notes_vault_mcp.dav import WebDav
+    from notes_vault_mcp.server import build_server
+    from notes_vault_mcp.vault import SubjectVaults
+
+    tokens = PersonalTokens(auth.auth_dir or auth_dir())
+    server = build_server(vaults, auth, personal_tokens=tokens, dav_url=auth.dav_url)
+    mcp_app = server.streamable_http_app(
+        host=host,
+        stateless_http=True,
+        json_response=True,
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    )
+    prefix = auth.path_prefix
+    routes = []
+    if isinstance(vaults, SubjectVaults):
+        routes.append(Mount(prefix + "/dav", app=WebDav(vaults, tokens, mount=prefix + "/dav")))
+    routes.append(Mount(prefix or "/", app=mcp_app))
+    guard = Middleware(
+        ForwardedIdentity,
+        verifier=ForwardedVerifier(auth),
+        header=auth.identity_header,
+        health_path=prefix + "/up",
+        open_prefixes=(prefix + "/dav",),
+    )
+    return Starlette(routes=routes, middleware=[guard], lifespan=forwarded_lifespan(mcp_app))

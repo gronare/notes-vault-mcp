@@ -157,6 +157,7 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 | `context` | cheap | The session-start call: the system notes covering a path, the open tasks, the reference notes and the tail of the repo log, in one answer. |
 | `list_files` | cheap | Paths only. |
 | `read_file` | moderate | One note, prefixed with `etag: <version>`. A superseded note carries a warning callout. |
+| `obsidian_access` | write | `--auth forwarded` only. Mints the personal token Obsidian's Remotely Save plugin uses over WebDAV and shows it once; a new token revokes the previous one. |
 | `lint` | moderate | Reads every note and reports drift. |
 | `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. Files that are not notes (`.vault/schema.yml`, `.base` views) are stored verbatim. |
 | `append_file` | write | Appends and bumps `updated`. Creates the note when missing. |
@@ -245,15 +246,19 @@ finishing it is `close`. Lint leaves backlog notes alone however old they get, a
 VAULT_TOKEN=$(openssl rand -hex 32) notes-vault-mcp serve --transport http --host 0.0.0.0 --port 8765
 ```
 
-Streamable HTTP on `/mcp`, with three ways to authenticate: `--auth bearer` (the default),
-`--auth oidc` and `--auth builtin`.
+Streamable HTTP on `/mcp`, with four ways to authenticate: `--auth bearer` (the default),
+`--auth oidc`, `--auth builtin` and `--auth forwarded`.
 
 `bearer` is the LAN mode. Every request must carry `Authorization: Bearer $VAULT_TOKEN`; anything
 else gets 401 before it reaches the server. `VAULT_TOKEN` is mandatory in this mode — the command
 refuses to start without it. It is a single token with full access, and claude.ai cannot use it.
 
-The other two speak OAuth, which is what a Claude connector needs. See
+`oidc` and `builtin` speak OAuth, which is what a Claude connector needs. See
 [Remote: claude.ai, Claude Desktop and mobile](#remote-claudeai-claude-desktop-and-mobile).
+
+`forwarded` is for a server that sits behind a proxy which already did the OAuth: it trusts a
+signed identity header and serves one vault per subject. See
+[Behind a proxy: one vault per person](#behind-a-proxy-one-vault-per-person).
 
 ## Remote: claude.ai, Claude Desktop and mobile
 
@@ -393,6 +398,53 @@ kubectl exec -it deploy/notes-vault-mcp -- notes-vault-mcp owner set-password
 
 Fill in `ingressClassName` and point `secretName` at a TLS certificate — an existing secret, or one
 cert-manager issues.
+
+## Behind a proxy: one vault per person
+
+`--auth forwarded` is for an organisation that already runs an OAuth authorization server in front
+of its MCP servers and forwards the caller's identity as a signed token in a header (the pattern
+Cloudflare Access uses with `Cf-Access-Jwt-Assertion`). The server verifies that token with the
+proxy's public key, takes the subject from it, and serves that subject's own vault: a prefix per
+person in one bucket (or a folder per person under `VAULT_PATH`), with its own index, its own
+`.vault/schema.yml` and a welcome note, all created on the first request. Nothing is provisioned
+by hand; granting access at the proxy is the whole onboarding.
+
+```sh
+notes-vault-mcp serve --transport http --host 0.0.0.0 --port 8765 --auth forwarded
+```
+
+The contract with the proxy: a request without a valid identity gets `403` with no
+`WWW-Authenticate` challenge (advertising an authorization server here would point clients past
+the proxy), the transport is stateless with plain JSON responses so a buffering proxy needs no
+`Mcp-Session-Id`, the `Host` header is not checked, and `/up` answers `ok` without a token for
+readiness probes. The OAuth metadata routes are not served in this mode; the proxy owns them.
+
+| Variable | Meaning |
+| --- | --- |
+| `VAULT_PUBLIC_URL` | Required. The address clients reach the server on; its hostname is the `aud` the token must carry, its path (if any) prefixes every route. |
+| `VAULT_IDENTITY_PUBLIC_KEY` | Required. The proxy's PEM public key (RS256 or ES256), raw or base64 on one line. |
+| `VAULT_IDENTITY_ISSUER` | Required. The `iss` in the proxy's tokens. |
+| `VAULT_IDENTITY_HEADER` | The header carrying the token. Default `X-Forwarded-Identity`. |
+| `VAULT_IDENTITY_TYP` | When set, the token's `typ` must match. |
+| `VAULT_IDENTITY_WRITE_CLAIMS` | Entitlement names (in the token's `entitlements` list or `scope`) that grant `vault:read` and `vault:write`. Default `vault:write`. |
+| `VAULT_IDENTITY_READ_CLAIMS` | Entitlement names that grant `vault:read` only. Default `vault:read`. A token with neither gets `403 insufficient_scope`. |
+| `VAULT_SUBJECT_PREFIX` | Where the vaults live under the bucket or folder: `<prefix>/<sub>/`. Default `users`. |
+| `VAULT_AUTH_DIR` | Where `personal.sqlite` keeps the hashed personal tokens. |
+| `VAULT_CACHE_DIR` | One SQLite index per subject lives here; give it a volume. |
+
+The token needs `iss`, `aud`, `sub` and `exp`; `email` and `name` are used when present. Subjects
+that are not plain identifiers are hashed before they name a folder.
+
+### Obsidian through the same server
+
+Each vault is also served over WebDAV at `VAULT_PUBLIC_URL/dav/`, for Obsidian's Remotely Save
+plugin, which cannot do OAuth. The person asks Claude to run `obsidian_access`; the server mints a
+personal token, returns it once and stores only its hash. Remotely Save gets the `/dav/` address,
+any username (the email is the convention) and that token as the password. Running
+`obsidian_access` again rotates the token. The proxy must pass `/dav/*` straight through, with the
+client's `Authorization` header and the WebDAV verbs and headers (`PROPFIND`, `MKCOL`, `MOVE`,
+`COPY`, `Depth`, `Destination`, `Overwrite`) intact. The welcome note written on the first request
+carries these instructions for the person.
 
 ## Development
 
