@@ -351,12 +351,23 @@ redirect URI to allow in the provider is the one claude.ai shows in that dialog.
 
 ### Pocket ID
 
-1. Create the groups `vault` and `vault-writers`, and put users in them.
-2. Create an OIDC client named `claude.ai` with claude.ai's callback URL as its redirect URI.
-3. Make sure the `groups` claim is included in the access token, not only in the id token.
-4. Set `VAULT_OIDC_ISSUER` to Pocket ID's base URL and `VAULT_OIDC_AUDIENCE` to the client id.
+claude.ai sends the MCP resource (the `/mcp` URL) as an OAuth `resource` parameter, and Pocket ID
+only accepts a resource it knows as an API. So:
 
-Then paste that client id and secret into the connector's Advanced settings in claude.ai.
+1. Settings → APIs → Add API: a name and the resource identifier, exactly `VAULT_PUBLIC_URL` + `/mcp`.
+   Add two permissions: key `vault:read` and key `vault:write`, with the names your family will see on
+   the consent screen.
+2. Settings → User Groups: create `vault` (read) and `vault-writers` (write) and put users in them.
+3. Settings → OIDC Clients → Add: name `claude.ai`, callback URL `https://claude.ai/api/mcp/auth_callback`,
+   PKCE on, public client off, allowed user groups `vault`. Under API access, grant the API with both
+   permissions (user-delegated). Copy the client id and secret.
+4. On the server: `VAULT_OIDC_ISSUER` is Pocket ID's base URL, `VAULT_OIDC_AUDIENCE` is the resource
+   identifier from step 1 (Pocket ID puts it in `aud`), and `VAULT_OIDC_SCOPES` is
+   `openid profile email groups vault:read vault:write`.
+5. In claude.ai, add the connector with the client id and secret under Advanced settings.
+
+The user's groups decide what a token may do; the client's permissions only matter when the
+provider reports no groups at all, in the token or through userinfo.
 
 ### Kubernetes
 

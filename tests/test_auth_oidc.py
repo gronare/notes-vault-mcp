@@ -148,6 +148,21 @@ async def test_a_scope_claim_grants_access_when_the_groups_do_not(idp: Idp):
 
 
 @pytest.mark.anyio
+async def test_the_groups_from_userinfo_outrank_the_client_permissions(idp: Idp):
+    raw = idp.token(scope="openid vault:read vault:write", userinfo={"sub": "anna", "groups": ["vault"]})
+    token = await idp.verifier().verify_token(raw)
+    assert token is not None
+    assert token.scopes == ["vault:read"]
+
+
+@pytest.mark.anyio
+async def test_the_groups_in_the_token_outrank_the_client_permissions(idp: Idp):
+    token = await idp.verifier().verify_token(idp.token(scope="openid vault:read vault:write", groups=["vault"]))
+    assert token is not None
+    assert token.scopes == ["vault:read"]
+
+
+@pytest.mark.anyio
 async def test_a_token_from_another_issuer_is_refused(idp: Idp):
     assert await idp.verifier().verify_token(idp.token(iss="https://evil.example.com", groups=["vault"])) is None
 

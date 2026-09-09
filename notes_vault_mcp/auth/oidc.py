@@ -83,9 +83,15 @@ class OidcVerifier:
         return str(self._document[name])
 
     async def _scopes(self, token: str, claims: dict[str, Any]) -> list[str]:
-        if "groups" in claims or _granted(claims):
+        if "groups" in claims:
             return self._decide(claims)
-        return self._decide(await self._userinfo_claims(token, _expiry(claims)))
+        try:
+            info = await self._userinfo_claims(token, _expiry(claims))
+        except Exception:
+            info = {}
+        if "groups" in info:
+            return self._decide(info)
+        return _granted(claims) or _granted(info)
 
     def _decide(self, claims: dict[str, Any]) -> list[str]:
         groups = _groups(claims)

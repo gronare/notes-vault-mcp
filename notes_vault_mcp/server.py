@@ -27,7 +27,7 @@ SEARCH_DESCRIPTION = (
 def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
     from notes_vault_mcp.auth.http import server_auth_kwargs
 
-    server = MCPServer("vault", instructions=instructions(vault.schema), version="0.3.1", **server_auth_kwargs(auth))
+    server = MCPServer("vault", instructions=instructions(vault.schema), version="0.3.2", **server_auth_kwargs(auth))
 
     def run(action: Callable[[], str], force: bool = False, write: bool = False) -> str:
         try:
