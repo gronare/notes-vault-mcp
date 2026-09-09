@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import Any
 
@@ -13,6 +14,7 @@ ALGORITHMS = ["RS256", "ES256"]
 DISCOVERY_PATH = "/.well-known/openid-configuration"
 REFETCH_SECONDS = 60.0
 TIMEOUT_SECONDS = 10.0
+USERINFO_TTL = 300.0
 
 
 class OidcVerifier:
@@ -20,21 +22,29 @@ class OidcVerifier:
         self.config = config
         self.client = client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
         self._keys: dict[str, jwt.PyJWK] = {}
-        self._jwks_url = ""
+        self._document: dict[str, Any] = {}
         self._refetched_at: float | None = None
+        self._userinfo: dict[str, tuple[float, dict[str, Any]]] = {}
 
     async def verify_token(self, token: str) -> AccessToken | None:
         try:
-            claims = await self._claims(token)
+            return await self._verified(token)
         except Exception:
             return None
+
+    async def _verified(self, token: str) -> AccessToken | None:
+        try:
+            header = jwt.get_unverified_header(token)
+        except jwt.PyJWTError:
+            return await self._from_userinfo(token)
+        claims = await self._claims(token, header.get("kid", ""))
         if claims is None:
             return None
-        scopes = self._scopes(claims)
+        scopes = await self._scopes(token, claims)
         return self._access_token(token, claims, scopes) if scopes else None
 
-    async def _claims(self, token: str) -> dict[str, Any] | None:
-        key = await self._key(jwt.get_unverified_header(token).get("kid", ""))
+    async def _claims(self, token: str, kid: str) -> dict[str, Any] | None:
+        key = await self._key(kid)
         if key is None:
             return None
         return jwt.decode(
@@ -60,26 +70,61 @@ class OidcVerifier:
         return self._refetched_at is None or time.monotonic() - self._refetched_at >= REFETCH_SECONDS
 
     async def _load_keys(self) -> None:
-        response = await self.client.get(await self._discover())
+        response = await self.client.get(await self._endpoint("jwks_uri"))
         response.raise_for_status()
         keys = jwt.PyJWKSet.from_dict(response.json()).keys
         self._keys = {key.key_id: key for key in keys if key.key_id}
 
-    async def _discover(self) -> str:
-        if not self._jwks_url:
+    async def _endpoint(self, name: str) -> str:
+        if not self._document:
             response = await self.client.get(self.config.issuer + DISCOVERY_PATH)
             response.raise_for_status()
-            self._jwks_url = str(response.json()["jwks_uri"])
-        return self._jwks_url
+            self._document = response.json()
+        return str(self._document[name])
 
-    def _scopes(self, claims: dict[str, Any]) -> list[str]:
+    async def _scopes(self, token: str, claims: dict[str, Any]) -> list[str]:
+        if "groups" in claims or _granted(claims):
+            return self._decide(claims)
+        return self._decide(await self._userinfo_claims(token, _expiry(claims)))
+
+    def _decide(self, claims: dict[str, Any]) -> list[str]:
         groups = _groups(claims)
         if self.config.write_group in groups:
             return [READ_SCOPE, WRITE_SCOPE]
         if self.config.read_group in groups:
             return [READ_SCOPE]
-        granted = str(claims.get("scope") or "").split()
-        return [scope for scope in SCOPES if scope in granted]
+        return _granted(claims)
+
+    async def _userinfo_claims(self, token: str, expires_at: float) -> dict[str, Any]:
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = time.time()
+        cached = self._userinfo.get(digest)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+        response = await self.client.get(
+            await self._endpoint("userinfo_endpoint"), headers={"Authorization": f"Bearer {token}"}
+        )
+        response.raise_for_status()
+        claims = response.json()
+        self._userinfo = {key: entry for key, entry in self._userinfo.items() if entry[0] > now}
+        self._userinfo[digest] = (expires_at, claims)
+        return claims
+
+    async def _from_userinfo(self, token: str) -> AccessToken | None:
+        claims = await self._userinfo_claims(token, time.time() + USERINFO_TTL)
+        subject = claims.get("sub")
+        scopes = self._decide(claims)
+        if not subject or not scopes:
+            return None
+        return AccessToken(
+            token=token,
+            client_id=_client_id(claims),
+            scopes=scopes,
+            expires_at=None,
+            resource=self.config.resource_url,
+            subject=str(subject),
+            claims=claims,
+        )
 
     def _access_token(self, token: str, claims: dict[str, Any], scopes: list[str]) -> AccessToken:
         subject = claims.get("sub")
@@ -92,6 +137,15 @@ class OidcVerifier:
             subject=str(subject) if subject else None,
             claims=claims,
         )
+
+
+def _expiry(claims: dict[str, Any]) -> float:
+    return min(float(claims["exp"]), time.time() + USERINFO_TTL)
+
+
+def _granted(claims: dict[str, Any]) -> list[str]:
+    named = str(claims.get("scope") or "").split()
+    return [scope for scope in SCOPES if scope in named]
 
 
 def _groups(claims: dict[str, Any]) -> list[str]:

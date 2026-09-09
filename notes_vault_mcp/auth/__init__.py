@@ -13,6 +13,7 @@ WRITE_SCOPE = "vault:write"
 SCOPES = (READ_SCOPE, WRITE_SCOPE)
 DEFAULT_READ_GROUP = "vault"
 DEFAULT_WRITE_GROUP = "vault-writers"
+DEFAULT_IDP_SCOPES = ("openid", "profile", "email", "groups")
 
 NO_PUBLIC_URL = (
     "notes-vault-mcp: --auth {mode} needs VAULT_PUBLIC_URL, the https address clients reach this server on "
@@ -30,6 +31,7 @@ class AuthConfig:
     audience: str = ""
     read_group: str = DEFAULT_READ_GROUP
     write_group: str = DEFAULT_WRITE_GROUP
+    idp_scopes: tuple[str, ...] = DEFAULT_IDP_SCOPES
     auth_dir: Path | None = None
 
     @property
@@ -39,6 +41,10 @@ class AuthConfig:
     @property
     def resource_url(self) -> str:
         return f"{self.public_url.rstrip('/')}/mcp"
+
+    @property
+    def advertised_scopes(self) -> tuple[str, ...]:
+        return self.idp_scopes if self.mode == "oidc" else (READ_SCOPE,)
 
 
 def auth_dir() -> Path:
@@ -68,5 +74,6 @@ def auth_config(mode: AuthMode) -> AuthConfig:
             audience=env("VAULT_OIDC_AUDIENCE") or "",
             read_group=env("VAULT_OIDC_READ_GROUP") or DEFAULT_READ_GROUP,
             write_group=env("VAULT_OIDC_WRITE_GROUP") or DEFAULT_WRITE_GROUP,
+            idp_scopes=tuple((env("VAULT_OIDC_SCOPES") or "").split()) or DEFAULT_IDP_SCOPES,
         )
     return AuthConfig(mode="builtin", public_url=public_url, issuer=public_url, auth_dir=auth_dir())

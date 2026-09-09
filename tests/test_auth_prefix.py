@@ -36,12 +36,21 @@ async def test_the_protected_resource_metadata_sits_at_the_root_well_known_path(
 
 
 @pytest.mark.anyio
-async def test_the_metadata_names_the_issuer_and_both_scopes(vault: Vault, idp: Idp, monkeypatch):
+async def test_the_metadata_names_the_issuer_and_the_provider_scopes(vault: Vault, idp: Idp, monkeypatch):
     app = oidc_app(vault, idp, monkeypatch, public_url=PUBLIC_URL)
     async with session(app, "", MCP_PATH) as opened:
         metadata = (await opened.client.get(METADATA_PATH)).json()
     assert metadata["authorization_servers"] == [idp.issuer]
-    assert metadata["scopes_supported"] == ["vault:read", "vault:write"]
+    assert metadata["scopes_supported"] == ["openid", "profile", "email", "groups"]
+
+
+@pytest.mark.anyio
+async def test_the_builtin_login_still_advertises_the_vault_read_scope(vault: Vault, tmp_path: Path):
+    app = builtin_app(vault, tmp_path / "auth")
+    async with session(app, "", MCP_PATH) as opened:
+        metadata = (await opened.client.get(METADATA_PATH)).json()
+    assert metadata["authorization_servers"] == [PUBLIC_URL]
+    assert metadata["scopes_supported"] == ["vault:read"]
 
 
 @pytest.mark.anyio

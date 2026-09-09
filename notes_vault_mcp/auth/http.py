@@ -17,7 +17,7 @@ def auth_settings(auth: AuthConfig) -> AuthSettings:
     return AuthSettings(
         issuer_url=auth.issuer,
         resource_server_url=auth.resource_url,
-        required_scopes=[READ_SCOPE],
+        required_scopes=[READ_SCOPE] if builtin else None,
         client_registration_options=ClientRegistrationOptions(
             enabled=builtin, valid_scopes=list(SCOPES), default_scopes=[READ_SCOPE]
         ),
@@ -82,8 +82,6 @@ def build_http_app(vault: Vault, auth: AuthConfig, host: str = "127.0.0.1") -> A
     app = server.streamable_http_app(host=host, transport_security=transport_security(auth))
     if auth.mode == "bearer":
         return BearerToken(app, auth.bearer_token)
-    if auth.path_prefix:
-        from notes_vault_mcp.auth.prefix import mount_under_prefix
+    from notes_vault_mcp.auth.prefix import mount_under_prefix
 
-        return mount_under_prefix(app, auth, server)
-    return app
+    return mount_under_prefix(app, auth, server)

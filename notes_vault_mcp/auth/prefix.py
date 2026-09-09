@@ -10,7 +10,7 @@ from starlette.applications import Starlette
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.types import Receive, Scope, Send
 
-from notes_vault_mcp.auth import SCOPES, AuthConfig
+from notes_vault_mcp.auth import AuthConfig
 
 URL = TypeAdapter(AnyHttpUrl, config=ConfigDict(url_preserve_empty_path=True))
 AUTHORIZATION_SERVER_PATH = "/.well-known/oauth-authorization-server"
@@ -31,10 +31,10 @@ def mount_under_prefix(app: Starlette, auth: AuthConfig, server: Any) -> Starlet
         create_protected_resource_routes(
             resource_url=URL.validate_python(auth.resource_url),
             authorization_servers=[URL.validate_python(auth.issuer)],
-            scopes_supported=list(SCOPES),
+            scopes_supported=list(auth.advertised_scopes),
         )
     )
-    if getattr(server, "_auth_server_provider", None) is not None:
+    if auth.path_prefix and getattr(server, "_auth_server_provider", None) is not None:
         routes.append(_authorization_server_route(app, auth.path_prefix))
     routes.append(Mount(auth.path_prefix, app=app))
     return Starlette(routes=routes, lifespan=_forwarded_lifespan(app))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from notes_vault_mcp.vault import Vault
 
 ISSUER = "https://idp.example.com"
 JWKS_PATH = "/jwks"
+USERINFO_PATH = "/userinfo"
 PROTOCOL_VERSION = "2025-06-18"
 NOTE = "---\ntitle: Oidc\ndate: 2026-08-01\nupdated: 2026-08-01\ntags: [mcp]\nstatus: active\n---\n\nKropp.\n"
 
@@ -34,8 +36,10 @@ class Idp:
         self.issuer = issuer
         self.spare = list(_key_pool())
         self.private: dict[str, Any] = {}
+        self.profiles: dict[str, dict[str, Any]] = {}
         self.discovery_calls = 0
         self.jwks_calls = 0
+        self.userinfo_calls = 0
         self.offline = False
         self.add_key("one")
 
@@ -44,9 +48,17 @@ class Idp:
         self.private[kid] = key
         return key
 
-    def token(self, kid: str = "one", **claims: Any) -> str:
+    def token(self, kid: str = "one", userinfo: dict[str, Any] | None = None, **claims: Any) -> str:
         payload = {"iss": self.issuer, "sub": "carl", "exp": int(time.time()) + 300, **claims}
-        return jwt.encode(payload, self.private[kid], algorithm="RS256", headers={"kid": kid})
+        encoded = jwt.encode(payload, self.private[kid], algorithm="RS256", headers={"kid": kid})
+        if userinfo is not None:
+            self.profiles[encoded] = userinfo
+        return encoded
+
+    def opaque_token(self, **profile: Any) -> str:
+        value = f"pocket-id-{len(self.profiles)}-{secrets.token_hex(8)}"
+        self.profiles[value] = profile
+        return value
 
     def foreign_token(self, **claims: Any) -> str:
         payload = {"iss": self.issuer, "sub": "carl", "exp": int(time.time()) + 300, **claims}
@@ -57,11 +69,27 @@ class Idp:
             raise httpx.ConnectError("no route to the identity provider")
         if request.url.path.endswith("/.well-known/openid-configuration"):
             self.discovery_calls += 1
-            return httpx.Response(200, json={"issuer": self.issuer, "jwks_uri": self.issuer + JWKS_PATH})
+            return httpx.Response(200, json=self.discovery())
         if request.url.path == JWKS_PATH:
             self.jwks_calls += 1
             return httpx.Response(200, json={"keys": [_jwk(kid, key) for kid, key in self.private.items()]})
+        if request.url.path == USERINFO_PATH:
+            self.userinfo_calls += 1
+            return self.userinfo(request.headers.get("authorization", ""))
         return httpx.Response(404)
+
+    def discovery(self) -> dict[str, Any]:
+        return {
+            "issuer": self.issuer,
+            "jwks_uri": self.issuer + JWKS_PATH,
+            "userinfo_endpoint": self.issuer + USERINFO_PATH,
+        }
+
+    def userinfo(self, authorization: str) -> httpx.Response:
+        profile = self.profiles.get(authorization.removeprefix("Bearer "))
+        if profile is None:
+            return httpx.Response(401, json={"error": "invalid_token"})
+        return httpx.Response(200, json=profile)
 
     def client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(transport=httpx.MockTransport(self.handle))
@@ -199,6 +227,64 @@ async def test_an_unknown_kid_refetches_the_jwks_at_most_once_a_minute(idp: Idp)
     assert idp.jwks_calls == 2
 
 
+@pytest.mark.anyio
+async def test_a_jwt_without_groups_takes_them_from_userinfo(idp: Idp):
+    token = idp.token(userinfo={"sub": "carl", "groups": ["vault-writers"]})
+    verified = await idp.verifier().verify_token(token)
+    assert verified is not None
+    assert verified.scopes == ["vault:read", "vault:write"]
+    assert idp.userinfo_calls == 1
+
+
+@pytest.mark.anyio
+async def test_a_token_that_names_its_groups_never_asks_userinfo(idp: Idp):
+    await idp.verifier().verify_token(idp.token(groups=["vault"]))
+    assert idp.userinfo_calls == 0
+
+
+@pytest.mark.anyio
+async def test_the_userinfo_answer_is_cached_per_token(idp: Idp):
+    verifier = idp.verifier()
+    token = idp.token(userinfo={"sub": "carl", "groups": ["vault"]})
+    await verifier.verify_token(token)
+    await verifier.verify_token(token)
+    assert idp.userinfo_calls == 1
+    await verifier.verify_token(idp.token(sub="ada", userinfo={"sub": "ada", "groups": ["vault"]}))
+    assert idp.userinfo_calls == 2
+
+
+@pytest.mark.anyio
+async def test_userinfo_without_a_known_group_refuses_the_token(idp: Idp):
+    token = idp.token(userinfo={"sub": "carl", "groups": ["staff"]})
+    assert await idp.verifier().verify_token(token) is None
+
+
+@pytest.mark.anyio
+async def test_a_userinfo_call_the_provider_rejects_refuses_the_token(idp: Idp):
+    assert await idp.verifier().verify_token(idp.token()) is None
+    assert idp.userinfo_calls == 1
+
+
+@pytest.mark.anyio
+async def test_an_opaque_token_is_accepted_through_userinfo(idp: Idp):
+    verified = await idp.verifier().verify_token(idp.opaque_token(sub="carl", groups=["vault"]))
+    assert verified is not None
+    assert verified.scopes == ["vault:read"]
+    assert verified.subject == "carl"
+    assert verified.expires_at is None
+    assert verified.resource == "https://vault.example.com/mcp"
+
+
+@pytest.mark.anyio
+async def test_an_opaque_token_without_a_subject_is_refused(idp: Idp):
+    assert await idp.verifier().verify_token(idp.opaque_token(groups=["vault"])) is None
+
+
+@pytest.mark.anyio
+async def test_an_opaque_token_the_provider_does_not_know_is_refused(idp: Idp):
+    assert await idp.verifier().verify_token("pocket-id-stranger") is None
+
+
 def _request(request_id: int, method: str, params: dict[str, Any]) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
 
@@ -249,11 +335,17 @@ class Session:
         return answer["result"]
 
 
-def oidc_app(vault: Vault, idp: Idp, monkeypatch: pytest.MonkeyPatch, public_url: str = "http://localhost") -> Any:
+def oidc_app(
+    vault: Vault,
+    idp: Idp,
+    monkeypatch: pytest.MonkeyPatch,
+    public_url: str = "http://localhost",
+    **overrides: Any,
+) -> Any:
     monkeypatch.setattr(
         oidc_module, "OidcVerifier", lambda config: OidcVerifier(config, client=idp.client()), raising=True
     )
-    return build_http_app(vault, idp.config(public_url=public_url))
+    return build_http_app(vault, idp.config(public_url=public_url, **overrides))
 
 
 @asynccontextmanager
@@ -308,3 +400,39 @@ async def test_a_write_token_may_write(vault: Vault, idp: Idp, monkeypatch):
         result = await opened.tool("write_file", {"path": "Areas/oidc.md", "content": NOTE})
     assert not result.get("isError")
     assert "Written: Areas/oidc.md" in text_of(result)
+
+
+@pytest.mark.anyio
+async def test_the_metadata_advertises_the_scopes_the_provider_knows(vault: Vault, idp: Idp, monkeypatch):
+    app = oidc_app(vault, idp, monkeypatch)
+    async with session(app, "") as opened:
+        metadata = (await opened.client.get("/.well-known/oauth-protected-resource/mcp")).json()
+    assert metadata["scopes_supported"] == ["openid", "profile", "email", "groups"]
+    assert metadata["resource"] == "http://localhost/mcp"
+    assert metadata["authorization_servers"] == [ISSUER]
+
+
+@pytest.mark.anyio
+async def test_the_advertised_scopes_come_from_the_configuration(vault: Vault, idp: Idp, monkeypatch):
+    app = oidc_app(vault, idp, monkeypatch, idp_scopes=("openid", "groups"))
+    async with session(app, "") as opened:
+        metadata = (await opened.client.get("/.well-known/oauth-protected-resource/mcp")).json()
+    assert metadata["scopes_supported"] == ["openid", "groups"]
+
+
+@pytest.mark.anyio
+async def test_a_token_the_provider_will_not_describe_is_refused_by_the_endpoint(vault: Vault, idp: Idp, monkeypatch):
+    app = oidc_app(vault, idp, monkeypatch)
+    async with session(app, idp.token()) as opened:
+        response = await opened.post(_request(1, "initialize", {}))
+    assert response.status_code == 401
+    assert idp.userinfo_calls == 1
+
+
+@pytest.mark.anyio
+async def test_an_opaque_token_reaches_the_tools(vault: Vault, idp: Idp, monkeypatch):
+    app = oidc_app(vault, idp, monkeypatch)
+    async with session(app, idp.opaque_token(sub="carl", groups=["vault"])) as opened:
+        await opened.initialize()
+        listing = await opened.call(2, "tools/list", {})
+    assert "search" in {tool["name"] for tool in listing["result"]["tools"]}

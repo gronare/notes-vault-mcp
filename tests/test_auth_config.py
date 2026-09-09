@@ -12,6 +12,7 @@ VARIABLES = (
     "VAULT_OIDC_AUDIENCE",
     "VAULT_OIDC_READ_GROUP",
     "VAULT_OIDC_WRITE_GROUP",
+    "VAULT_OIDC_SCOPES",
 )
 
 
@@ -73,6 +74,26 @@ def test_oidc_defaults_the_groups_to_vault_and_vault_writers(monkeypatch: pytest
     config = auth_config("oidc")
     assert (config.read_group, config.write_group) == ("vault", "vault-writers")
     assert config.audience == ""
+
+
+def test_oidc_asks_the_provider_for_openid_profile_email_and_groups(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
+    monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    assert auth_config("oidc").idp_scopes == ("openid", "profile", "email", "groups")
+
+
+def test_the_provider_scopes_come_from_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
+    monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    monkeypatch.setenv("VAULT_OIDC_SCOPES", "openid  groups")
+    assert auth_config("oidc").idp_scopes == ("openid", "groups")
+
+
+def test_oidc_advertises_the_provider_scopes_and_builtin_advertises_vault_read():
+    oidc = AuthConfig(mode="oidc", public_url="https://vault.example.com", idp_scopes=("openid", "groups"))
+    builtin = AuthConfig(mode="builtin", public_url="https://vault.example.com")
+    assert oidc.advertised_scopes == ("openid", "groups")
+    assert builtin.advertised_scopes == (READ_SCOPE,)
 
 
 def test_a_public_url_without_a_path_has_no_prefix():

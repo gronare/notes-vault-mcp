@@ -290,6 +290,7 @@ One server instance serves one vault.
 | `VAULT_OIDC_AUDIENCE` | oidc | The client id the provider puts in `aud`. Checked when set, ignored when empty. |
 | `VAULT_OIDC_READ_GROUP` | oidc | Group granting `vault:read`. Default `vault`. |
 | `VAULT_OIDC_WRITE_GROUP` | oidc | Group granting `vault:read` and `vault:write`. Default `vault-writers`. |
+| `VAULT_OIDC_SCOPES` | oidc | Scopes the resource metadata advertises, so the client asks the provider for scopes it knows. Default `openid profile email groups`. When the access token carries no `groups`, the server asks the provider's userinfo endpoint. |
 | `VAULT_TOKEN` | bearer | The static token. |
 | `VAULT_CACHE_DIR` | all | Where the index lives. Default `~/.cache/notes-vault-mcp`. |
 | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | all | The vault, unless `VAULT_PATH` names a local folder. |
