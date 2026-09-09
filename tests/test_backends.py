@@ -107,3 +107,70 @@ def test_s3_move_and_delete(s3_backend: S3Backend):
         s3_backend.get("Areas/greenhouse.md")
     s3_backend.delete("Archive/greenhouse.md")
     assert s3_backend.list() == []
+
+
+def test_s3_list_all_returns_every_object_and_directory_markers(s3_backend: S3Backend):
+    s3_backend.mkdir("Attachments/")
+    s3_backend.put_bytes("Attachments/pic.png", b"\x89PNG", "image/png")
+    keys = [entry.key for entry in s3_backend.list_all()]
+    assert keys == ["Areas/greenhouse.md", "Attachments/", "Attachments/pic.png", "Notes/skip.txt"]
+    assert [entry.key for entry in s3_backend.list_all("Attachments/")] == ["Attachments/", "Attachments/pic.png"]
+    assert next(entry for entry in s3_backend.list_all() if entry.key == "Attachments/").is_dir
+
+
+def test_s3_bytes_round_trip_with_a_content_type(s3_backend: S3Backend):
+    version = s3_backend.put_bytes("Attachments/pic.png", bytes(range(256)))
+    data, read_version = s3_backend.get_bytes("Attachments/pic.png")
+    assert data == bytes(range(256))
+    assert read_version == version
+    head = s3_backend.client.head_object(Bucket=BUCKET, Key="vault/Attachments/pic.png")
+    assert head["ContentType"] == "image/png"
+
+
+def test_s3_get_bytes_missing_raises_not_found(s3_backend: S3Backend):
+    with pytest.raises(NotFound):
+        s3_backend.get_bytes("Attachments/nope.png")
+
+
+def test_local_list_all_includes_directories_and_non_notes(vault_dir: Path):
+    backend = LocalBackend(vault_dir)
+    backend.put_bytes("Attachments/pic.png", b"png")
+    keys = [entry.key for entry in backend.list_all()]
+    assert "Attachments/" in keys and "Attachments/pic.png" in keys
+    assert ".obsidian/" in keys
+    assert [entry.key for entry in backend.list_all("Attachments/")] == ["Attachments/", "Attachments/pic.png"]
+
+
+def test_local_delete_removes_a_whole_directory(vault_dir: Path):
+    backend = LocalBackend(vault_dir)
+    backend.put_bytes("Tmp/a/b.txt", b"x")
+    backend.delete("Tmp/")
+    assert not (vault_dir / "Tmp").exists()
+
+
+def test_make_subject_backend_nests_the_subject_under_the_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from notes_vault_mcp.backends import make_subject_backend
+
+    monkeypatch.setenv("VAULT_PATH", str(tmp_path))
+    for name in ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET"):
+        monkeypatch.delenv(name, raising=False)
+    backend, identifier = make_subject_backend("1042", "users")
+    assert isinstance(backend, LocalBackend)
+    assert backend.root == (tmp_path / "users" / "1042").resolve()
+    other, other_identifier = make_subject_backend("1187", "users")
+    assert identifier != other_identifier
+
+
+def test_make_subject_backend_extends_the_s3_prefix(monkeypatch: pytest.MonkeyPatch):
+    from notes_vault_mcp.backends import make_subject_backend
+
+    monkeypatch.delenv("VAULT_PATH", raising=False)
+    monkeypatch.setenv("S3_ENDPOINT", ENDPOINT)
+    monkeypatch.setenv("S3_ACCESS_KEY", "key")
+    monkeypatch.setenv("S3_SECRET_KEY", "secret")
+    monkeypatch.setenv("S3_BUCKET", BUCKET)
+    monkeypatch.setenv("S3_PREFIX", "vault")
+    with mock_aws():
+        backend, _ = make_subject_backend("1042", "users")
+    assert isinstance(backend, S3Backend)
+    assert backend.prefix == "vault/users/1042/"

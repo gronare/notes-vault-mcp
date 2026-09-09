@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import mimetypes
+
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
@@ -58,14 +60,31 @@ class S3Backend:
                 )
         return sorted(entries, key=lambda entry: entry.key)
 
+    def list_all(self, prefix: str = "") -> list[Entry]:
+        entries: list[Entry] = []
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix + prefix):
+            for obj in page.get("Contents", []):
+                key = self._vault_key(obj["Key"])
+                if not key:
+                    continue
+                entries.append(
+                    Entry(key=key, version=_etag(obj.get("ETag")), mtime=obj["LastModified"], size=obj.get("Size", 0))
+                )
+        return sorted(entries, key=lambda entry: entry.key)
+
     def get(self, key: str) -> tuple[str, str]:
+        data, version = self.get_bytes(key)
+        return data.decode("utf-8"), version
+
+    def get_bytes(self, key: str) -> tuple[bytes, str]:
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=self._object_key(key))
         except ClientError as exc:
             if exc.response["Error"]["Code"] in MISSING_CODES:
                 raise NotFound(key) from exc
             raise
-        return response["Body"].read().decode("utf-8"), _etag(response.get("ETag"))
+        return response["Body"].read(), _etag(response.get("ETag"))
 
     def current_version(self, key: str) -> str | None:
         try:
@@ -81,13 +100,19 @@ class S3Backend:
             current = self.current_version(key)
             if current != expected_version:
                 raise VersionConflict(f"{key} changed since it was read (etag {current}, expected {expected_version})")
+        return self.put_bytes(key, text.encode("utf-8"), "text/markdown; charset=utf-8")
+
+    def put_bytes(self, key: str, data: bytes, content_type: str | None = None) -> str:
         response = self.client.put_object(
             Bucket=self.bucket,
             Key=self._object_key(key),
-            Body=text.encode("utf-8"),
-            ContentType="text/markdown; charset=utf-8",
+            Body=data,
+            ContentType=content_type or mimetypes.guess_type(key)[0] or "application/octet-stream",
         )
         return _etag(response.get("ETag"))
+
+    def mkdir(self, key: str) -> None:
+        self.client.put_object(Bucket=self.bucket, Key=self._object_key(key.rstrip("/") + "/"), Body=b"")
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key))

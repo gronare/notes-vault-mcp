@@ -6,8 +6,9 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+from forwarded_support import Proxy
 
-from notes_vault_mcp.vault import Vault, open_vault
+from notes_vault_mcp.vault import SubjectVaults, Vault, open_vault
 
 FIXTURE_VAULT = Path(__file__).parent / "fixtures" / "vault"
 TOKEN_RE = re.compile(r"@@(TODAY|D(\d+))@@")
@@ -44,3 +45,25 @@ def vault(vault_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> V
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture
+def proxy() -> Proxy:
+    return Proxy()
+
+
+@pytest.fixture
+def storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "store"
+    monkeypatch.setenv("VAULT_PATH", str(root))
+    monkeypatch.setenv("VAULT_CACHE_DIR", str(tmp_path / "cache"))
+    for name in ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "VAULT_SCHEMA"):
+        monkeypatch.delenv(name, raising=False)
+    return root
+
+
+@pytest.fixture
+def vaults(storage: Path, tmp_path: Path) -> SubjectVaults:
+    opened = SubjectVaults(cache=tmp_path / "cache", prefix="users", dav_url="http://localhost/dav/")
+    yield opened
+    opened.close()

@@ -7,12 +7,15 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from notes_vault_mcp import notes
 from notes_vault_mcp.auth import AuthConfig
+from notes_vault_mcp.auth.personal import PersonalTokens
 from notes_vault_mcp.auth.scopes import ScopeError, require_write
 from notes_vault_mcp.backends import VaultError
 from notes_vault_mcp.frontmatter import FrontmatterError
 from notes_vault_mcp.schema import instructions
 from notes_vault_mcp.search import render, search
-from notes_vault_mcp.vault import Vault, open_vault
+from notes_vault_mcp.vault import SingleVault, Vault, VaultResolver, open_vault
+
+VERSION = "0.4.0"
 
 EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError, ScopeError)
 
@@ -24,17 +27,26 @@ SEARCH_DESCRIPTION = (
 )
 
 
-def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
+def build_server(
+    vaults: Vault | VaultResolver,
+    auth: AuthConfig | None = None,
+    personal_tokens: PersonalTokens | None = None,
+    dav_url: str = "",
+) -> MCPServer:
     from notes_vault_mcp.auth.http import server_auth_kwargs
 
-    server = MCPServer("vault", instructions=instructions(vault.schema), version="0.3.1", **server_auth_kwargs(auth))
+    resolver: VaultResolver = SingleVault(vaults) if isinstance(vaults, Vault) else vaults
+    server = MCPServer(
+        "vault", instructions=instructions(resolver.instruction_schema), version=VERSION, **server_auth_kwargs(auth)
+    )
 
-    def run(action: Callable[[], str], force: bool = False, write: bool = False) -> str:
+    def run(action: Callable[[Vault], str], force: bool = False, write: bool = False) -> str:
         try:
             if write:
                 require_write()
+            vault = resolver.current()
             vault.index.sync(force=force)
-            return action()
+            return action(vault)
         except EXPECTED_FAILURES as exc:
             raise ToolError(str(exc)) from exc
 
@@ -53,7 +65,7 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         since: str | None = None,
     ) -> str:
         return run(
-            lambda: render(
+            lambda vault: render(
                 search(
                     vault.index,
                     vault.schema,
@@ -80,7 +92,7 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         ),
     )
     def read_file(path: str) -> str:
-        return run(lambda: notes.read(vault, path))
+        return run(lambda vault: notes.read(vault, path))
 
     @server.tool(
         name="write_file",
@@ -91,29 +103,29 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         ),
     )
     def write_file(path: str, content: str, expected_etag: str | None = None) -> str:
-        return run(lambda: notes.write(vault, path, content, expected_etag=expected_etag), write=True)
+        return run(lambda vault: notes.write(vault, path, content, expected_etag=expected_etag), write=True)
 
     @server.tool(
         name="append_file",
         description="WRITE — appends to a note and bumps `updated`. Creates the note when it is missing.",
     )
     def append_file(path: str, content: str) -> str:
-        return run(lambda: notes.append(vault, path, content), write=True)
+        return run(lambda vault: notes.append(vault, path, content), write=True)
 
     @server.tool(name="move_file", description="WRITE — moves or renames a note. Use `close` to archive finished work.")
     def move_file(source: str, dest: str) -> str:
-        return run(lambda: notes.move(vault, source, dest), write=True)
+        return run(lambda vault: notes.move(vault, source, dest), write=True)
 
     @server.tool(name="delete_file", description="WRITE — deletes a note for good. Prefer `close`, which keeps it.")
     def delete_file(path: str) -> str:
-        return run(lambda: notes.delete(vault, path), write=True)
+        return run(lambda vault: notes.delete(vault, path), write=True)
 
     @server.tool(
         name="list_files",
         description="CHEAP — paths only, no metadata and no bodies. `search` answers context questions better.",
     )
     def list_files(prefix: str = "") -> str:
-        return run(lambda: _listing(vault, prefix))
+        return run(lambda vault: _listing(vault, prefix))
 
     @server.tool(
         name="close",
@@ -124,7 +136,9 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         ),
     )
     def close_tool(path: str, merged_into: str | None = None, status: str | None = None) -> str:
-        return run(lambda: f"Closed: {notes.close(vault, path, merged_into=merged_into, status=status)}", write=True)
+        return run(
+            lambda vault: f"Closed: {notes.close(vault, path, merged_into=merged_into, status=status)}", write=True
+        )
 
     @server.tool(
         name="backlog_add",
@@ -137,7 +151,7 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
     )
     def backlog_add(title: str, area: str, line: str, priority: str | None = None, source: str | None = None) -> str:
         return run(
-            lambda: f"Filed: {notes.backlog_add(vault, title, area, line, priority=priority, source=source)}",
+            lambda vault: f"Filed: {notes.backlog_add(vault, title, area, line, priority=priority, source=source)}",
             write=True,
         )
 
@@ -149,7 +163,7 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         ),
     )
     def backlog_tool(area: str | None = None, priority: str | None = None, limit: int = 50) -> str:
-        return run(lambda: notes.render_backlog(notes.backlog(vault, area=area, priority=priority)[:limit]))
+        return run(lambda vault: notes.render_backlog(notes.backlog(vault, area=area, priority=priority)[:limit]))
 
     @server.tool(
         name="log_append",
@@ -160,7 +174,9 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         ),
     )
     def log_append(repo: str, line: str, commits: list[str] | None = None, area: str | None = None) -> str:
-        return run(lambda: notes.log_append(vault, repo, line, commits=tuple(commits or ()), area=area), write=True)
+        return run(
+            lambda vault: notes.log_append(vault, repo, line, commits=tuple(commits or ()), area=area), write=True
+        )
 
     @server.tool(
         name="context",
@@ -176,7 +192,7 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         query: str | None = None,
         limit: int = 10,
     ) -> str:
-        return run(lambda: notes.context(vault, path=path, repo=repo, query=query, limit=limit).render())
+        return run(lambda vault: notes.context(vault, path=path, repo=repo, query=query, limit=limit).render())
 
     @server.tool(
         name="lint",
@@ -187,9 +203,39 @@ def build_server(vault: Vault, auth: AuthConfig | None = None) -> MCPServer:
         ),
     )
     def lint_tool() -> str:
-        return run(lambda: notes.lint(vault).render(), force=True)
+        return run(lambda vault: notes.lint(vault).render(), force=True)
+
+    if personal_tokens is not None:
+
+        @server.tool(
+            name="obsidian_access",
+            description=(
+                "WRITE — mints the personal token Obsidian's Remotely Save plugin uses to reach this vault over "
+                "WebDAV, and shows it once. Issuing a new token revokes the previous one. The username is the "
+                "email on your identity."
+            ),
+        )
+        def obsidian_access() -> str:
+            return run(lambda vault: _obsidian_access(personal_tokens, dav_url), write=True)
 
     return server
+
+
+def _obsidian_access(tokens: PersonalTokens, dav_url: str) -> str:
+    from mcp.server.auth.middleware.auth_context import get_access_token
+
+    token = get_access_token()
+    if token is None or not token.subject:
+        raise ScopeError("no authenticated subject on this request")
+    email = str((token.claims or {}).get("email") or token.subject)
+    secret = tokens.issue(token.subject, label=email)
+    return (
+        "Remotely Save → WebDAV\n"
+        f"Server address: {dav_url}\n"
+        f"Username: {email}\n"
+        f"Password: {secret}\n\n"
+        "Shown once. Issuing a new token revokes this one."
+    )
 
 
 def _listing(vault: Vault, prefix: str) -> str:
@@ -201,12 +247,12 @@ def run_stdio(vault: Vault) -> None:
     build_server(vault).run("stdio")
 
 
-def run_http(vault: Vault, host: str, port: int, auth: AuthConfig) -> None:
+def run_http(vaults: Vault | VaultResolver, host: str, port: int, auth: AuthConfig) -> None:
     import uvicorn
 
     from notes_vault_mcp.auth.http import build_http_app
 
-    uvicorn.run(build_http_app(vault, auth), host=host, port=port, log_level="info")
+    uvicorn.run(build_http_app(vaults, auth), host=host, port=port, log_level="info")
 
 
 def create_server() -> MCPServer:

@@ -37,7 +37,7 @@ def mount_under_prefix(app: Starlette, auth: AuthConfig, server: Any) -> Starlet
     if auth.path_prefix and getattr(server, "_auth_server_provider", None) is not None:
         routes.append(_authorization_server_route(app, auth.path_prefix))
     routes.append(Mount(auth.path_prefix, app=app))
-    return Starlette(routes=routes, lifespan=_forwarded_lifespan(app))
+    return Starlette(routes=routes, lifespan=forwarded_lifespan(app))
 
 
 def _authorization_server_route(app: Starlette, prefix: str) -> Route:
@@ -48,7 +48,7 @@ def _authorization_server_route(app: Starlette, prefix: str) -> Route:
     )
 
 
-def _forwarded_lifespan(app: Starlette) -> Callable[[Starlette], AbstractAsyncContextManager[None]]:
+def forwarded_lifespan(app: Starlette) -> Callable[[Starlette], AbstractAsyncContextManager[None]]:
     @asynccontextmanager
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
         async with app.router.lifespan_context(app):
