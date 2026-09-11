@@ -7,7 +7,7 @@ filters:
         - status == "draft"
 formulas:
   age: if(updated, (today() - date(updated)).days, "")
-  stale: if(updated, if((today() - date(updated)).days > 30, "stale", ""), "")
+  stale: if(updated, if((today() - date(updated)).days > {{STALE_DAYS}}, "stale", ""), "")
 properties:
   file.name:
     displayName: Note

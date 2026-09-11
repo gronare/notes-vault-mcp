@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import date
 from importlib import resources
 
+import yaml
+
 from notes_vault_mcp.backends import SCHEMA_KEY, VaultBackend
 
-BASES = ("Areas.base", "Open tasks.base", "Resources.base", "Backlog.base")
+BASES = ("Areas.base", "Open tasks.base", "Resources.base", "Backlog.base", "Log.base")
 TEMPLATES = ("schema.yml", *BASES)
 WELCOME_KEY = "Welcome.md"
 
@@ -30,11 +32,12 @@ def initialize(
     schema_template: str = "schema.yml",
     welcome: dict[str, str] | None = None,
 ) -> tuple[list[str], list[str]]:
-    # Writes the schema, the Bases views and, when asked, the welcome note; existing files stay unless forced.
     existing = {entry.key for entry in backend.list()}
     written: list[str] = []
     kept: list[str] = []
-    plan = [(SCHEMA_KEY, template(schema_template))] + [(name, template(name)) for name in BASES]
+    schema_text = template(schema_template)
+    stale = str((yaml.safe_load(schema_text) or {}).get("stale_after_days", 30))
+    plan = [(SCHEMA_KEY, schema_text)] + [(name, _fill(template(name), {"STALE_DAYS": stale})) for name in BASES]
     if welcome is not None:
         values = {"DATE": date.today().isoformat(), **welcome}
         plan.append((WELCOME_KEY, _fill(template("welcome.md"), values)))

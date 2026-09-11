@@ -97,7 +97,7 @@ uvx notes-vault-mcp init
 `init` writes into the vault, and refuses to overwrite anything without `--force`:
 
 - `.vault/schema.yml` — the frontmatter contract, copied from the built-in default so you can edit it.
-- `Areas.base`, `Open tasks.base`, `Resources.base` — Obsidian Bases views over the same structure.
+- `Areas.base`, `Open tasks.base`, `Resources.base`, `Backlog.base`, `Log.base` — Obsidian Bases views over the same structure.
 
 It then prints a CLAUDE.md snippet to stdout: the workflow rules an agent needs on its side of the
 conversation.
