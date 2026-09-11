@@ -15,7 +15,7 @@ from notes_vault_mcp.schema import instructions
 from notes_vault_mcp.search import render, search
 from notes_vault_mcp.vault import SingleVault, Vault, VaultResolver, open_vault
 
-VERSION = "0.4.4"
+VERSION = "0.4.5"
 
 EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError, ScopeError)
 
