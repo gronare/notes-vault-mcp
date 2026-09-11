@@ -83,7 +83,10 @@ def command_changelog(args: argparse.Namespace) -> int:
 def command_lint(args: argparse.Namespace) -> int:
     vault = open_vault()
     vault.index.sync(force=True)
+    parked = notes.park_stale(vault) if args.park_stale else []
     findings = notes.lint(vault)
+    for key in parked:
+        findings.add("parked", f"{key}: status backlog, untouched for more than {vault.schema.stale_after_days} days")
     print(findings.render())
     if args.write:
         vault.backend.put(args.write, notes.lint_note_text(findings))
@@ -164,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     lint = sub.add_parser("lint", help="report vault drift")
     lint.add_argument("--write", metavar="VAULT_PATH", help="also write the findings as a note")
+    lint.add_argument(
+        "--park-stale",
+        action="store_true",
+        help="set status backlog on open task notes untouched for longer than the schema's stale_after_days",
+    )
     lint.set_defaults(func=command_lint)
 
     sync = sub.add_parser("sync", help="refresh the index")

@@ -154,13 +154,14 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 | Tool | Cost | What it does |
 | --- | --- | --- |
 | `search` | cheap | Full-text over the index. Title, summary, tags and body, with synonyms, prefixes, quoted phrases and folded diacritics. A bare commit sha finds the notes that mention it. Hides archive and superseded notes and says how many. |
-| `context` | cheap | The session-start call: the system notes covering a path, the open tasks, the reference notes and the tail of the repo log, in one answer. |
+| `context` | cheap | The session-start call: the system notes covering a path, the open tasks, a triage list of open notes older than `stale_after_days` with the three ways to settle each, the backlog, the reference notes and the tail of the repo log, in one answer. |
 | `list_files` | cheap | Paths only. |
 | `read_file` | moderate | One note, prefixed with `etag: <version>`. A superseded note carries a warning callout. |
 | `obsidian_access` | write | `--auth forwarded` only. Mints the personal token Obsidian's Remotely Save plugin uses over WebDAV and shows it once; a new token revokes the previous one. |
 | `lint` | moderate | Reads every note and reports drift. |
 | `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. Files that are not notes (`.vault/schema.yml`, `.base` views) are stored verbatim. |
 | `append_file` | write | Appends and bumps `updated`. Creates the note when missing. |
+| `set_status` | write | Changes a note's status without rewriting it: `backlog` with a priority parks it, `active` picks it up again. |
 | `close` | write | Sets status complete (or superseded, with `superseded_by`, when `merged_into` is given) and moves the note into the archive. |
 | `log_append` | write | One dated line in the repo log, with the commits it produced. Creates the log when missing. |
 | `move_file` | write | Moves or renames. |
@@ -173,11 +174,15 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 
 `broken_frontmatter`, `missing_required` (per field), `missing_area`, `unknown_tags` (only when the
 vocabulary is strict), `unresolved_links`, `orphans` (no inbound wikilink; log and archive ignored),
-`stale_active`, `archive_status_mismatch`, `duplicate_stems`, `superseded_target_missing`.
+`stale_active`, `archive_status_mismatch`, `duplicate_stems`, `superseded_target_missing`. With `--park-stale`
+the open task notes untouched for longer than `stale_after_days` are set to `backlog` (priority `low`, source
+`veckolint <date>`) before the report and listed under `parked`, so `active` always means touched within the
+window; reviving one is `set_status(path, "active")`.
 
 ```sh
 uvx notes-vault-mcp lint
 uvx notes-vault-mcp lint --write "Log/lint-$(date +%F).md"
+uvx notes-vault-mcp lint --write Log/lint.md --park-stale
 ```
 
 ## Hooks
@@ -192,8 +197,8 @@ answer to "is this note still true?" before the agent believes it.
 sha does not appear in the repo log, and open task notes older than the schema's `stale_after_days`
 that the session read or wrote (found through the vault tool calls in the session transcript). It
 returns `{"decision": "block", "reason": ...}`, or nothing at all when the vault is up to date. Stale
-notes the session did not touch are its business at the next session start, where `context` lists
-them as STALE, not at every stop. Set `VAULT_STOP_HOOK=off` to silence the hook.
+notes the session did not touch are the next session's business: `context` lists them under `triage`
+with the three ways to settle each (close, a dated line, or park in the backlog), not at every stop. Set `VAULT_STOP_HOOK=off` to silence the hook.
 
 ```json
 {

@@ -187,10 +187,38 @@ def test_context_lists_only_open_tasks_for_the_repo(vault: Vault):
     }
 
 
-def test_context_flags_a_stale_task(vault: Vault):
+def test_context_lists_a_stale_task_under_triage_with_the_three_ways_to_settle_it(vault: Vault):
     text = notes.context(vault, path=str(Path("~/homelab").expanduser()), repo="homelab").render()
-    assert "Projects/homelab-stale.md" in text
-    assert "STALE" in text
+    assert "## triage — 1 open notes older than 30 days" in text
+    assert "Projects/homelab-stale.md" in text.split("## triage")[1]
+    assert "Projects/homelab-stale.md" not in text.split("## triage")[0]
+    assert "close(path)" in text and 'set_status(path, "backlog", priority)' in text
+
+
+def test_set_status_parks_and_revives_a_note(vault: Vault, vault_dir: Path):
+    assert notes.set_status(vault, "Projects/homelab-stale.md", "backlog", priority="low", source="triage") == (
+        "Projects/homelab-stale.md: status backlog, priority low"
+    )
+    frontmatter, _ = parse((vault_dir / "Projects/homelab-stale.md").read_text(encoding="utf-8"))
+    assert frontmatter["status"] == "backlog" and frontmatter["priority"] == "low" and frontmatter["source"] == "triage"
+    assert str(frontmatter["updated"]) == notes.today()
+    assert notes.context(vault, repo="homelab").render().count("Projects/homelab-stale.md") == 1
+    notes.set_status(vault, "Projects/homelab-stale.md", "active")
+    assert vault.index.note("Projects/homelab-stale.md").status == "active"
+
+
+def test_set_status_refuses_a_status_outside_the_schema(vault: Vault):
+    with pytest.raises(notes.ValidationError, match="status"):
+        notes.set_status(vault, "Projects/homelab-stale.md", "someday")
+
+
+def test_park_stale_moves_only_the_old_open_notes_to_the_backlog(vault: Vault):
+    parked = notes.park_stale(vault)
+    assert parked == ["Projects/homelab-stale.md"]
+    note = vault.index.note("Projects/homelab-stale.md")
+    assert note.status == "backlog" and note.priority == "low" and note.source.startswith("veckolint ")
+    assert vault.index.note("Projects/greenhouse-fresh.md").status == "active"
+    assert notes.park_stale(vault) == []
 
 
 def test_context_includes_the_reference_notes(vault: Vault):

@@ -241,6 +241,9 @@ Workflow:
 1. Start a session with `context` (path, repo) — it returns the system notes for the code you are
    about to touch, the open tasks, the reference notes and the tail of the repo log. Cheaper and
    more complete than searching blind.
+   Its `triage` section lists open notes older than the stale window: settle each before new work,
+   `close` when done, `append_file` a dated line when still moving, `set_status(path, "backlog",
+   priority)` to park it.
 2. Before the first edit to a repo, an open note for the work must exist. Write it with `write_file`.
 3. Search with `search` before claiming anything about the current state. A note is a lead, the code
    is the truth: when the code disproves a note, correct the note in the same pass.

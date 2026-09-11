@@ -5,6 +5,9 @@ Never write markdown documentation into a git repo; it goes in the vault.
 
 - **Session start** — call `context` with the working directory and repo name. Read what it returns
   before touching code.
+- **Triage** — when `context` lists open notes older than the stale window, settle them before new
+  work: `close` what is done, `append_file` a dated line to what is still moving, `set_status(path,
+  "backlog", priority)` to park the rest. The session that created a note is gone; the next one owns it.
 - **Write gate** — a note for the current work must exist before the first Edit, Write or Bash call
   that modifies a file. Searching does not satisfy the gate; the note must be written.
 - **Code is truth** — a note is a lead, not a specification. Follow its `path` field, read the code,

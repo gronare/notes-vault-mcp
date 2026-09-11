@@ -19,6 +19,10 @@ TRUNCATED_MARKER = "… (truncated, read_file for the rest)"
 LOG_TAIL_LINES = 20
 OPEN_STATUSES = ("active", "draft")
 BACKLOG_STATUS = "backlog"
+TRIAGE_HINT = (
+    "Settle each before new work: close(path) when it is done, append_file(path, a dated line saying what "
+    'is still open) when it is still moving, set_status(path, "backlog", priority) to park it.'
+)
 PRIORITY_ORDER = ("urgent", "high", "medium", "low")
 SLUG_MAX = 60
 
@@ -118,6 +122,43 @@ def _free_key(vault: Vault, folder: str, basename: str) -> str:
         candidate = f"{folder}/{stem}-{suffix}.md"
         suffix += 1
     return candidate
+
+
+def set_status(vault: Vault, path: str, status: str, priority: str | None = None, source: str | None = None) -> str:
+    text, _ = _read(vault, path)
+    frontmatter, body = parse(text)
+    frontmatter["status"] = status
+    if priority:
+        frontmatter["priority"] = priority
+    if source:
+        frontmatter["source"] = source
+    stamped = _with_dates(frontmatter)
+    problems = validate(stamped, path, vault.schema)
+    if problems:
+        raise ValidationError("\n".join([f"{path} would not be a valid note:", *[f"- {p}" for p in problems]]))
+    out = dump(stamped, body)
+    _reindex(vault, path, out, vault.backend.put(path, out))
+    return f"{path}: status {status}" + (f", priority {priority}" if priority else "")
+
+
+def park_stale(vault: Vault) -> list[str]:
+    now = time.time()
+    task_folders = set(vault.schema.task_folders)
+    parked = []
+    for note in vault.index.all_notes():
+        if not note.valid or note.folder not in task_folders or note.status not in OPEN_STATUSES:
+            continue
+        if age_days(note, now) <= vault.schema.stale_after_days:
+            continue
+        set_status(
+            vault,
+            note.key,
+            BACKLOG_STATUS,
+            priority=note.priority or "low",
+            source=note.source or f"veckolint {today()}",
+        )
+        parked.append(note.key)
+    return parked
 
 
 def close(vault: Vault, path: str, merged_into: str | None = None, status: str | None = None) -> str:
@@ -299,6 +340,7 @@ class ContextBundle:
     system: list[tuple[Note, str]] = field(default_factory=list)
     system_rows: list[Note] = field(default_factory=list)
     tasks: list[Note] = field(default_factory=list)
+    triage: list[Note] = field(default_factory=list)
     backlog: list[Note] = field(default_factory=list)
     backlog_total: int = 0
     references: list[Note] = field(default_factory=list)
@@ -318,8 +360,16 @@ class ContextBundle:
             ]
             blocks.append("## other system notes\n" + "\n".join(rows))
         if self.tasks:
-            rows = [_task_row(note, now, self.stale_after_days) for note in self.tasks]
+            rows = [_task_row(note, now) for note in self.tasks]
             blocks.append("## open tasks\n" + "\n".join(rows))
+        if self.triage:
+            rows = [_task_row(note, now) for note in self.triage]
+            blocks.append(
+                f"## triage — {len(self.triage)} open notes older than {self.stale_after_days} days\n"
+                + "\n".join(rows)
+                + "\n"
+                + TRIAGE_HINT
+            )
         if self.backlog:
             rows = [f"{note.key} | {note.title} | {note.priority or '-'}" for note in self.backlog]
             blocks.append(f"## backlog ({self.backlog_total})\n" + "\n".join(rows))
@@ -333,10 +383,8 @@ class ContextBundle:
         return "\n\n".join(blocks)
 
 
-def _task_row(note: Note, now: float, stale_after_days: int) -> str:
-    days = age_days(note, now)
-    stale = " STALE" if days > stale_after_days else ""
-    return f"{note.key} | {note.title} | {humanize_age(days)} | {note.status}{stale}"
+def _task_row(note: Note, now: float) -> str:
+    return f"{note.key} | {note.title} | {humanize_age(age_days(note, now))} | {note.status}"
 
 
 def _truncate(text: str) -> str:
@@ -415,11 +463,16 @@ def context(
     references.sort(key=lambda note: note.updated, reverse=True)
     backlog_rows.sort(key=lambda note: note.updated, reverse=True)
     backlog_rows.sort(key=lambda note: priority_rank(note.priority))
+    now = time.time()
+    stale_after = vault.schema.stale_after_days
+    triage = [note for note in tasks if age_days(note, now) > stale_after]
+    fresh = [note for note in tasks if age_days(note, now) <= stale_after]
     system, system_rows = _system_notes(vault, notes, path, repo)
     return ContextBundle(
         system=system,
         system_rows=system_rows,
-        tasks=tasks[:limit],
+        tasks=fresh[:limit],
+        triage=triage[:limit],
         backlog=backlog_rows[:limit],
         backlog_total=len(backlog_rows),
         references=references[:limit],

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from notes_vault_mcp.cli import main
+from notes_vault_mcp.frontmatter import parse
 from notes_vault_mcp.notes import lint, lint_note_text
 from notes_vault_mcp.vault import Vault
 
@@ -88,3 +92,12 @@ def test_a_note_with_an_area_link_is_connected_not_orphaned(vault: Vault):
         'kind: trap\narea: "[[greenhouse]]"\n---\n\nIngen länkar hit, men area gör den till en del av grafen.\n',
     )
     assert "Resources/lonely-trap.md" not in groups(vault)["orphans"]
+
+
+def test_lint_park_stale_moves_old_open_notes_and_reports_them(vault: Vault, vault_dir: Path, capsys):
+    assert main(["lint", "--park-stale"]) == 0
+    out = capsys.readouterr().out
+    assert "## parked" in out and "Projects/homelab-stale.md" in out
+    assert "stale_active" not in out
+    frontmatter, _ = parse((vault_dir / "Projects/homelab-stale.md").read_text(encoding="utf-8"))
+    assert frontmatter["status"] == "backlog"

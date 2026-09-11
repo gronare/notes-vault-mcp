@@ -15,6 +15,7 @@ TOOL_NAMES = {
     "move_file",
     "delete_file",
     "list_files",
+    "set_status",
     "close",
     "backlog_add",
     "backlog",

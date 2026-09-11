@@ -9,7 +9,7 @@ from pathlib import Path
 
 from notes_vault_mcp import changelog
 from notes_vault_mcp.git import git, repo_name, repo_root
-from notes_vault_mcp.notes import OPEN_STATUSES, context, vault_paths_in
+from notes_vault_mcp.notes import context, vault_paths_in
 from notes_vault_mcp.search import age_days, humanize_age
 from notes_vault_mcp.vault import Vault, open_vault
 
@@ -98,15 +98,8 @@ def unlogged_commits(vault: Vault, root: Path, repo: str) -> list[tuple[str, str
 
 def stale_open_notes(vault: Vault, repo: str, path: str) -> list[tuple[str, str]]:
     now = time.time()
-    task_folders = set(vault.schema.task_folders)
     bundle = context(vault, path=path, repo=repo)
-    stale = []
-    for note in bundle.tasks:
-        if note.folder in task_folders and note.status in OPEN_STATUSES:
-            days = age_days(note, now)
-            if days > vault.schema.stale_after_days:
-                stale.append((note.key, f"{note.key} ({humanize_age(days)} old)"))
-    return stale
+    return [(note.key, f"{note.key} ({humanize_age(age_days(note, now))} old)") for note in bundle.triage]
 
 
 def _collect_vault_paths(node: object, touched: set[str]) -> None:

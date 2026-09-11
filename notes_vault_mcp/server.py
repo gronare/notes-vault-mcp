@@ -128,6 +128,17 @@ def build_server(
         return run(lambda vault: _listing(vault, prefix))
 
     @server.tool(
+        name="set_status",
+        description=(
+            "WRITE — changes a note's status without rewriting it: backlog (with a priority: urgent, high, "
+            "medium, low) parks it, active picks it up again, draft. The triage list at session start is "
+            "settled with this, append_file or close."
+        ),
+    )
+    def set_status_tool(path: str, status: str, priority: str | None = None, source: str | None = None) -> str:
+        return run(lambda vault: notes.set_status(vault, path, status, priority=priority, source=source), write=True)
+
+    @server.tool(
         name="close",
         description=(
             "WRITE — finishes a note: sets status complete (or superseded with superseded_by when "
