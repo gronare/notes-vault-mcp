@@ -127,6 +127,20 @@ frontmatter:
   kind_values: [system, task, trap, howto, decision, reference, log]
 ```
 
+Each kind carries a one-line rule saying when a note is that kind, and the server puts the rules in its
+instructions so every client picks kinds the same way:
+
+```yaml
+kinds:
+  trap: "a gotcha that bit once and will bite again; nothing to do, nothing was chosen"
+  decision: "a choice and its reasons; something was chosen, alternatives were dropped"
+  howto: "steps that are known to work; nothing chosen, nothing open"
+```
+
+A vault adds a kind by adding an entry (`research: "reading notes on a topic; no task, no decision"`),
+rewrites a rule by restating it, and drops a kind by setting it to `null`. `kind_values` alone, without
+rules, still works.
+
 `path` is what ties a note to code: a comma-separated list of directories (`~` is kept as written and
 also indexed expanded). That is what `context` and the session hook match against.
 

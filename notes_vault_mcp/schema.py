@@ -111,8 +111,16 @@ class Schema:
         return list(self._frontmatter().get("status_values") or [])
 
     @property
+    def kind_rules(self) -> dict[str, str]:
+        declared = self.data.get("kinds") or {}
+        return {str(name): str(rule) for name, rule in declared.items() if rule is not None}
+
+    @property
     def kind_values(self) -> list[str]:
-        return list(self._frontmatter().get("kind_values") or [])
+        declared = self.data.get("kinds") or {}
+        dropped = {str(name) for name, rule in declared.items() if rule is None}
+        listed = [str(k) for k in (self._frontmatter().get("kind_values") or []) if str(k) not in dropped]
+        return listed + [name for name in self.kind_rules if name not in listed]
 
     @property
     def priority_values(self) -> list[str]:
@@ -210,11 +218,18 @@ def _folder_lines(schema: Schema) -> list[str]:
     return lines
 
 
+def _kind_lines(schema: Schema) -> str:
+    rules = schema.kind_rules
+    if not rules:
+        return " " + ", ".join(schema.kind_values)
+    return "".join(f"\n  - {kind}: {rules[kind]}" if kind in rules else f"\n  - {kind}" for kind in schema.kind_values)
+
+
 def instructions(schema: Schema) -> str:
     required = ", ".join(schema.required_fields)
     optional = ", ".join(schema.optional_fields)
     statuses = ", ".join(schema.status_values)
-    kinds = ", ".join(schema.kind_values)
+    kinds = _kind_lines(schema)
     priorities = ", ".join(schema.priority_values)
     priority_line = f"\n- priority, on a backlog note, is one of: {priorities}" if priorities else ""
     area_folders = ", ".join(schema.area_required_in)
@@ -233,7 +248,7 @@ Frontmatter contract for every note:
 - required: {required}
 - optional: {optional}
 - status is one of: {statuses}
-- kind is one of: {kinds}{priority_line}
+- kind is one of:{kinds}{priority_line}
 - area is a wikilink to the system note, shaped [[stem]], and is required in: {area_folders}
 {vocabulary}{strictness}
 
