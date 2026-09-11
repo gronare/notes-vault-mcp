@@ -8,22 +8,22 @@ formulas:
   age: if(updated, (today() - date(updated)).days, "")
 properties:
   file.name:
-    displayName: Not
+    displayName: Note
   note.summary:
-    displayName: Vad
+    displayName: Summary
   note.priority:
-    displayName: Prioritet
+    displayName: Priority
   note.area:
-    displayName: Område
+    displayName: Area
   note.source:
-    displayName: Källa
+    displayName: Source
   note.updated:
-    displayName: Uppdaterad
+    displayName: Updated
   formula.age:
-    displayName: Dagar
+    displayName: Days
 views:
   - type: table
-    name: Per prioritet
+    name: By priority
     order:
       - file.name
       - priority
@@ -37,7 +37,7 @@ views:
       - property: updated
         direction: DESC
   - type: table
-    name: Per område
+    name: By area
     groupBy:
       property: area
       direction: ASC
@@ -50,7 +50,7 @@ views:
       - property: formula.rank
         direction: ASC
   - type: table
-    name: Nyast
+    name: Newest
     order:
       - file.name
       - priority
