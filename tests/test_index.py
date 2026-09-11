@@ -30,19 +30,19 @@ class CountingBackend:
 
 def test_sync_indexes_every_markdown_note(vault: Vault):
     keys = {note.key for note in vault.index.all_notes()}
-    assert "Areas/greenhouse.md" in keys
+    assert "Areas/orchard.md" in keys
     assert "Archive/old-plan.md" in keys
     assert not any(key.endswith(".base") or key.startswith(".obsidian") for key in keys)
 
 
 def test_sync_records_frontmatter_fields(vault: Vault):
-    note = vault.index.note("Projects/greenhouse-fresh.md")
-    assert note.title == "Greenhouse: bokningswidget i checkout"
+    note = vault.index.note("Projects/orchard-fresh.md")
+    assert note.title == "Orchard: bokningswidget i checkout"
     assert note.status == "active"
-    assert note.area == "[[greenhouse]]"
-    assert note.tags == ["greenhouse", "booking", "ui"]
+    assert note.area == "[[orchard]]"
+    assert note.tags == ["orchard", "booking", "ui"]
     assert note.folder == "Projects"
-    assert note.stem == "greenhouse-fresh"
+    assert note.stem == "orchard-fresh"
 
 
 def test_sync_marks_broken_frontmatter_invalid(vault: Vault):
@@ -58,22 +58,22 @@ def test_sync_is_throttled_until_forced(vault: Vault):
 def test_sync_refetches_only_the_changed_note(vault: Vault, vault_dir: Path):
     counting = CountingBackend(vault.index.backend)
     vault.index.backend = counting
-    changed = vault_dir / "Areas" / "homelab.md"
+    changed = vault_dir / "Areas" / "workshop.md"
     changed.write_text(changed.read_text(encoding="utf-8") + "\nEn ny rad.\n", encoding="utf-8")
     assert vault.index.sync(force=True) == 1
-    assert counting.fetched == ["Areas/homelab.md"]
+    assert counting.fetched == ["Areas/workshop.md"]
 
 
 def test_sync_removes_a_deleted_note(vault: Vault, vault_dir: Path):
-    (vault_dir / "Areas" / "homelab.md").unlink()
+    (vault_dir / "Areas" / "workshop.md").unlink()
     vault.index.sync(force=True)
-    assert vault.index.note("Areas/homelab.md") is None
+    assert vault.index.note("Areas/workshop.md") is None
 
 
 def test_sync_stores_paths_both_as_written_and_expanded(vault: Vault):
-    paths = vault.index.note("Areas/homelab.md").paths
-    assert "~/homelab" in paths
-    assert str(Path("~/homelab").expanduser()) in paths
+    paths = vault.index.note("Areas/workshop.md").paths
+    assert "~/workshop" in paths
+    assert str(Path("~/workshop").expanduser()) in paths
 
 
 def test_rebuild_reindexes_everything(vault: Vault):
@@ -87,7 +87,7 @@ def test_shas_need_a_letter_and_a_digit():
 
 
 def test_link_targets_drop_alias_heading_and_folder():
-    assert link_targets("[[greenhouse]] [[Areas/Homelab|hem]] [[note#rubrik]]") == ["greenhouse", "homelab", "note"]
+    assert link_targets("[[orchard]] [[Areas/Workshop|hem]] [[note#rubrik]]") == ["note", "orchard", "workshop"]
 
 
 def test_path_list_splits_on_comma_space():

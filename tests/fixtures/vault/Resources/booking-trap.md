@@ -2,10 +2,10 @@
 title: "Bokning: fällan i avbokningen"
 date: 2026-02-01
 updated: @@D40@@
-tags: [booking, greenhouse]
+tags: [booking, orchard]
 status: complete
 kind: trap
-area: "[[greenhouse]]"
+area: "[[orchard]]"
 summary: En avbokning som inte frigör sin slot lämnar lokalen låst.
 ---
 

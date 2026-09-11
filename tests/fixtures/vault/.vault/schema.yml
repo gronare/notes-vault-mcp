@@ -1,5 +1,9 @@
+tags:
+  vocabulary: [orchard, frame, frame-addons, workshop, core, grove, cluster, booking, ui, ci, deploy, backup, domain, dns, log]
 synonyms:
   - [bokning, booking]
   - [widget, komponent]
   - [domän, domain]
+  - [lund, grove]
+  - [kärna, core]
 stale_after_days: 30

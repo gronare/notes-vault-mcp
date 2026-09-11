@@ -51,16 +51,16 @@ def test_env_prefers_the_bare_variable(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_session_start_prints_the_context(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
+    repo = make_repo(tmp_path / "repos", "orchard")
     feed(monkeypatch, {"cwd": str(repo), "session_id": "abc"})
     assert main(["hook", "session-start"]) == 0
     out = capsys.readouterr().out
-    assert "Areas/greenhouse.md" in out
-    assert "Projects/greenhouse-fresh.md" in out
+    assert "Areas/orchard.md" in out
+    assert "Projects/orchard-fresh.md" in out
 
 
 def test_session_start_ends_with_how_to_read_the_vault(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
+    repo = make_repo(tmp_path / "repos", "orchard")
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "session-start"]) == 0
     out = capsys.readouterr().out
@@ -80,23 +80,23 @@ def test_session_start_exits_zero_with_no_backend(monkeypatch: pytest.MonkeyPatc
 def test_session_start_lists_commits_newer_than_the_note(
     vault: Vault, vault_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "stomme")
-    note = vault_dir / "Areas" / "stomme.md"
+    repo = make_repo(tmp_path / "repos", "frame")
+    note = vault_dir / "Areas" / "frame.md"
     note.write_text(
-        "---\ntitle: stomme\ndate: 2020-01-01\nupdated: 2020-01-01\n"
-        f"tags: [stomme]\nstatus: active\nkind: system\npath: {repo}\n---\n\nMotorn.\n",
+        "---\ntitle: frame\ndate: 2020-01-01\nupdated: 2020-01-01\n"
+        f"tags: [frame]\nstatus: active\nkind: system\npath: {repo}\n---\n\nKärnan.\n",
         encoding="utf-8",
     )
     vault.index.sync(force=True)
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "session-start"]) == 0
     out = capsys.readouterr().out
-    assert "commits since the note — Areas/stomme.md" in out
+    assert "commits since the note — Areas/frame.md" in out
     assert "First commit" in out
 
 
 def test_stop_blocks_when_a_commit_is_not_logged(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "stomme")
+    repo = make_repo(tmp_path / "repos", "frame")
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "stop"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -105,8 +105,8 @@ def test_stop_blocks_when_a_commit_is_not_logged(vault: Vault, monkeypatch: pyte
 
 
 def test_stop_is_silent_once_the_commit_is_logged(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "stomme")
-    notes.log_append(vault, "stomme", "Första bygget", commits=(head_sha(repo),))
+    repo = make_repo(tmp_path / "repos", "frame")
+    notes.log_append(vault, "frame", "Första bygget", commits=(head_sha(repo),))
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "stop"]) == 0
     assert capsys.readouterr().out == ""
@@ -115,14 +115,14 @@ def test_stop_is_silent_once_the_commit_is_logged(vault: Vault, monkeypatch: pyt
 def test_stop_is_silent_when_the_hook_is_already_active(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "stomme")
+    repo = make_repo(tmp_path / "repos", "frame")
     feed(monkeypatch, {"cwd": str(repo), "stop_hook_active": True})
     assert main(["hook", "stop"]) == 0
     assert capsys.readouterr().out == ""
 
 
 def test_stop_is_silent_when_switched_off(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "stomme")
+    repo = make_repo(tmp_path / "repos", "frame")
     monkeypatch.setenv("VAULT_STOP_HOOK", "off")
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "stop"]) == 0
@@ -139,22 +139,22 @@ def write_transcript(path: Path, tool: str, arguments: dict) -> Path:
 def test_stop_blocks_on_a_stale_note_the_session_touched(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "homelab")
-    notes.log_append(vault, "homelab", "Bygget", commits=(head_sha(repo),))
-    transcript = write_transcript(tmp_path / "t.jsonl", "read_file", {"path": "Projects/homelab-stale.md"})
+    repo = make_repo(tmp_path / "repos", "workshop")
+    notes.log_append(vault, "workshop", "Bygget", commits=(head_sha(repo),))
+    transcript = write_transcript(tmp_path / "t.jsonl", "read_file", {"path": "Projects/workshop-stale.md"})
     feed(monkeypatch, {"cwd": str(repo), "transcript_path": str(transcript)})
     assert main(["hook", "stop"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["decision"] == "block"
-    assert "Projects/homelab-stale.md" in payload["reason"]
+    assert "Projects/workshop-stale.md" in payload["reason"]
     assert "systemMessage" not in payload
 
 
 def test_stop_stays_silent_about_stale_notes_the_session_did_not_touch(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "homelab")
-    notes.log_append(vault, "homelab", "Bygget", commits=(head_sha(repo),))
+    repo = make_repo(tmp_path / "repos", "workshop")
+    notes.log_append(vault, "workshop", "Bygget", commits=(head_sha(repo),))
     transcript = write_transcript(tmp_path / "t.jsonl", "write_file", {"path": "Projects/other.md"})
     feed(monkeypatch, {"cwd": str(repo), "transcript_path": str(transcript)})
     assert main(["hook", "stop"]) == 0
@@ -164,8 +164,8 @@ def test_stop_stays_silent_about_stale_notes_the_session_did_not_touch(
 def test_stop_treats_a_missing_transcript_as_nothing_touched(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "homelab")
-    notes.log_append(vault, "homelab", "Bygget", commits=(head_sha(repo),))
+    repo = make_repo(tmp_path / "repos", "workshop")
+    notes.log_append(vault, "workshop", "Bygget", commits=(head_sha(repo),))
     feed(monkeypatch, {"cwd": str(repo), "transcript_path": str(tmp_path / "missing.jsonl")})
     assert main(["hook", "stop"]) == 0
     assert capsys.readouterr().out.strip() == ""
@@ -174,13 +174,13 @@ def test_stop_treats_a_missing_transcript_as_nothing_touched(
 def test_stop_blocks_on_an_unlogged_commit_without_naming_untouched_notes(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "homelab")
+    repo = make_repo(tmp_path / "repos", "workshop")
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "stop"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["decision"] == "block"
     assert head_sha(repo) in payload["reason"]
-    assert "Projects/homelab-stale.md" not in payload["reason"]
+    assert "Projects/workshop-stale.md" not in payload["reason"]
     assert "systemMessage" not in payload
 
 
@@ -214,7 +214,7 @@ def test_init_force_overwrites(vault: Vault, vault_dir: Path):
 
 
 def test_search_command_prints_rows(vault: Vault, capsys):
-    assert main(["search", "greenhouse", "--limit", "2"]) == 0
+    assert main(["search", "orchard", "--limit", "2"]) == 0
     assert capsys.readouterr().out.startswith("2 of 5")
 
 
@@ -229,13 +229,13 @@ def test_lint_command_can_write_a_note(vault: Vault, vault_dir: Path, capsys):
 
 
 def test_changelog_prints_log_commits_and_notes(vault: Vault, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    assert main(["changelog", "greenhouse", "2026-08", "--repo-path", str(repo)]) == 0
+    repo = make_repo(tmp_path / "repos", "orchard")
+    assert main(["changelog", "orchard", "2026-08", "--repo-path", str(repo)]) == 0
     out = capsys.readouterr().out
-    assert "# greenhouse — 2026-08" in out
+    assert "# orchard — 2026-08" in out
     assert "Release-grinden mäter A/B" in out
     assert "## commits" in out
-    assert "[[greenhouse-fresh]]" in out
+    assert "[[orchard-fresh]]" in out
 
 
 def test_serve_rejects_http_without_a_token(vault: Vault, monkeypatch: pytest.MonkeyPatch, capsys):
@@ -254,19 +254,19 @@ def test_repo_name_falls_back_to_the_directory(tmp_path):
 def test_session_start_follows_a_symlinked_repo_path(
     vault: Vault, vault_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "stomme")
+    repo = make_repo(tmp_path / "repos", "frame")
     link = tmp_path / "link"
     link.symlink_to(tmp_path / "repos")
-    note = vault_dir / "Areas" / "stomme.md"
+    note = vault_dir / "Areas" / "frame.md"
     note.write_text(
-        "---\ntitle: stomme\ndate: 2020-01-01\nupdated: 2020-01-01\n"
-        f"tags: [stomme]\nstatus: active\nkind: system\npath: {link / 'stomme'}\n---\n\nMotorn.\n",
+        "---\ntitle: frame\ndate: 2020-01-01\nupdated: 2020-01-01\n"
+        f"tags: [frame]\nstatus: active\nkind: system\npath: {link / 'frame'}\n---\n\nKärnan.\n",
         encoding="utf-8",
     )
     vault.index.sync(force=True)
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "session-start"]) == 0
-    assert "commits since the note — Areas/stomme.md" in capsys.readouterr().out
+    assert "commits since the note — Areas/frame.md" in capsys.readouterr().out
 
 
 def test_commits_since_shows_the_count_and_the_newest_ten(tmp_path):

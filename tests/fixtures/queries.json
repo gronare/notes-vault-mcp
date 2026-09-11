@@ -1,0 +1,453 @@
+[
+  {
+    "query": "orchard"
+  },
+  {
+    "query": "workshop"
+  },
+  {
+    "query": "frame"
+  },
+  {
+    "query": "frame-addons"
+  },
+  {
+    "query": "frame-core"
+  },
+  {
+    "query": "core"
+  },
+  {
+    "query": "grove"
+  },
+  {
+    "query": "cluster"
+  },
+  {
+    "query": "backup"
+  },
+  {
+    "query": "booking"
+  },
+  {
+    "query": "bokning"
+  },
+  {
+    "query": "ui"
+  },
+  {
+    "query": "ci"
+  },
+  {
+    "query": "deploy"
+  },
+  {
+    "query": "domain"
+  },
+  {
+    "query": "domän"
+  },
+  {
+    "query": "dns"
+  },
+  {
+    "query": "log"
+  },
+  {
+    "query": "lund"
+  },
+  {
+    "query": "lundkod"
+  },
+  {
+    "query": "kärna"
+  },
+  {
+    "query": "kärnan"
+  },
+  {
+    "query": "lunden"
+  },
+  {
+    "query": "komponent"
+  },
+  {
+    "query": "widget"
+  },
+  {
+    "query": "release"
+  },
+  {
+    "query": "checkout"
+  },
+  {
+    "query": "slots"
+  },
+  {
+    "query": "villkor"
+  },
+  {
+    "query": "teman"
+  },
+  {
+    "query": "booking-trap"
+  },
+  {
+    "query": "saknad-not"
+  },
+  {
+    "query": "orchard-fresh"
+  },
+  {
+    "query": "workshop-stale"
+  },
+  {
+    "query": "orchard-bokning"
+  },
+  {
+    "query": "orchard-portal"
+  },
+  {
+    "query": "lonely-trap"
+  },
+  {
+    "query": "gone"
+  },
+  {
+    "query": "kontrollplanet"
+  },
+  {
+    "query": "sajternas"
+  },
+  {
+    "query": "pinnar"
+  },
+  {
+    "query": "repon"
+  },
+  {
+    "query": "avbokningen"
+  },
+  {
+    "query": "avbokning"
+  },
+  {
+    "query": "bokningswidget"
+  },
+  {
+    "query": "bokningsbara"
+  },
+  {
+    "query": "byggrobotarna"
+  },
+  {
+    "query": "molnminuter"
+  },
+  {
+    "query": "klustret"
+  },
+  {
+    "query": "lagringsdrivare"
+  },
+  {
+    "query": "ingress"
+  },
+  {
+    "query": "tjänsterna"
+  },
+  {
+    "query": "backuperna"
+  },
+  {
+    "query": "objektlagret"
+  },
+  {
+    "query": "namespace"
+  },
+  {
+    "query": "ägarlabels"
+  },
+  {
+    "query": "utrullaren"
+  },
+  {
+    "query": "nollställs"
+  },
+  {
+    "query": "domänmodellen"
+  },
+  {
+    "query": "transaktion"
+  },
+  {
+    "query": "lokalen"
+  },
+  {
+    "query": "flagga"
+  },
+  {
+    "query": "utkast"
+  },
+  {
+    "query": "klareras"
+  },
+  {
+    "query": "tillägg"
+  },
+  {
+    "query": "körning"
+  },
+  {
+    "query": "målet"
+  },
+  {
+    "query": "kundvy"
+  },
+  {
+    "query": "betalning"
+  },
+  {
+    "query": "arkiverad"
+  },
+  {
+    "query": "översyn"
+  },
+  {
+    "query": "releaser"
+  },
+  {
+    "query": "namespace-ownership"
+  },
+  {
+    "query": "fällan"
+  },
+  {
+    "query": "testklustret"
+  },
+  {
+    "query": "lagringen"
+  },
+  {
+    "query": "grinden"
+  },
+  {
+    "query": "mäter"
+  },
+  {
+    "query": "bokningsplan"
+  },
+  {
+    "query": "checkout"
+  },
+  {
+    "query": "booking bokning"
+  },
+  {
+    "query": "domain domän"
+  },
+  {
+    "query": "grove lund"
+  },
+  {
+    "query": "core kärna"
+  },
+  {
+    "query": "widget komponent"
+  },
+  {
+    "query": "backup cluster"
+  },
+  {
+    "query": "deploy ci"
+  },
+  {
+    "query": "log orchard"
+  },
+  {
+    "query": "ui booking"
+  },
+  {
+    "query": "dns doman"
+  },
+  {
+    "query": "orchard bokning"
+  },
+  {
+    "query": "orchard release"
+  },
+  {
+    "query": "workshop backup"
+  },
+  {
+    "query": "frame-addons widget"
+  },
+  {
+    "query": "orchard lundkod"
+  },
+  {
+    "query": "bokning slot"
+  },
+  {
+    "query": "release lunden"
+  },
+  {
+    "query": "workshop klustret"
+  },
+  {
+    "query": "domän dns"
+  },
+  {
+    "query": "orchard checkout"
+  },
+  {
+    "query": "core kärnan"
+  },
+  {
+    "query": "grove lunden"
+  },
+  {
+    "query": "ci byggrobotarna"
+  },
+  {
+    "query": "deploy namespace"
+  },
+  {
+    "query": "orchard ui"
+  },
+  {
+    "query": "\"frame-addons och\""
+  },
+  {
+    "query": "\"en release flyttar lunden\""
+  },
+  {
+    "query": "\"bokade slots\""
+  },
+  {
+    "query": "\"i samma transaktion\""
+  },
+  {
+    "query": "\"Release-grinden mäter A/B\""
+  },
+  {
+    "query": "\"en egen lagringsdrivare\""
+  },
+  {
+    "query": "\"Bokningswidget bakom flagga\""
+  },
+  {
+    "query": "\"den centrala domänmodellen\""
+  },
+  {
+    "query": "9ca31382"
+  },
+  {
+    "query": "9ca3138"
+  },
+  {
+    "query": "a1b2c3d"
+  },
+  {
+    "query": "e4f5a6b"
+  },
+  {
+    "query": "1a2b3c4"
+  },
+  {
+    "query": "beef1234"
+  },
+  {
+    "query": "c0ffee12"
+  },
+  {
+    "query": "1a2b3c4d5e6f"
+  },
+  {
+    "query": "0123456789abcdef01234567"
+  },
+  {
+    "query": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4"
+  },
+  {
+    "query": "kvantdator"
+  },
+  {
+    "query": "zzzqqq"
+  },
+  {
+    "query": "xyzzy-plopp"
+  },
+  {
+    "query": "flimmerfnatt"
+  },
+  {
+    "query": "blomsterspjut"
+  },
+  {
+    "query": "qwertyuiop"
+  },
+  {
+    "query": "orchard",
+    "status": "active"
+  },
+  {
+    "query": "orchard",
+    "status": "draft"
+  },
+  {
+    "query": "bokning",
+    "status": "complete"
+  },
+  {
+    "query": "workshop",
+    "status": "active"
+  },
+  {
+    "query": "domän",
+    "status": "superseded"
+  },
+  {
+    "query": "release",
+    "status": "draft"
+  },
+  {
+    "query": "backup",
+    "status": "active"
+  },
+  {
+    "query": "ci",
+    "status": "active"
+  },
+  {
+    "query": "widget",
+    "status": "active"
+  },
+  {
+    "query": "orchard",
+    "status": "backlog"
+  },
+  {
+    "query": "orchard",
+    "path": "Projects"
+  },
+  {
+    "query": "orchard",
+    "path": "Areas"
+  },
+  {
+    "query": "orchard",
+    "path": "Log"
+  },
+  {
+    "query": "bokning",
+    "path": "Resources"
+  },
+  {
+    "query": "workshop",
+    "path": "Areas"
+  },
+  {
+    "query": "release",
+    "path": "Projects"
+  }
+]

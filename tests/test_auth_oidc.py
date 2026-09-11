@@ -49,7 +49,7 @@ class Idp:
         return key
 
     def token(self, kid: str = "one", userinfo: dict[str, Any] | None = None, **claims: Any) -> str:
-        payload = {"iss": self.issuer, "sub": "carl", "exp": int(time.time()) + 300, **claims}
+        payload = {"iss": self.issuer, "sub": "ida", "exp": int(time.time()) + 300, **claims}
         encoded = jwt.encode(payload, self.private[kid], algorithm="RS256", headers={"kid": kid})
         if userinfo is not None:
             self.profiles[encoded] = userinfo
@@ -61,7 +61,7 @@ class Idp:
         return value
 
     def foreign_token(self, **claims: Any) -> str:
-        payload = {"iss": self.issuer, "sub": "carl", "exp": int(time.time()) + 300, **claims}
+        payload = {"iss": self.issuer, "sub": "ida", "exp": int(time.time()) + 300, **claims}
         return jwt.encode(payload, self.spare[0], algorithm="RS256", headers={"kid": "stranger"})
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -198,7 +198,7 @@ async def test_the_access_token_carries_the_subject_resource_and_claims(idp: Idp
     verifier = idp.verifier()
     token = await verifier.verify_token(idp.token(groups=["vault"], azp="pocket-id-client"))
     assert token is not None
-    assert token.subject == "carl"
+    assert token.subject == "ida"
     assert token.resource == "https://vault.example.com/mcp"
     assert token.client_id == "pocket-id-client"
     assert token.claims is not None and token.claims["groups"] == ["vault"]
@@ -244,7 +244,7 @@ async def test_an_unknown_kid_refetches_the_jwks_at_most_once_a_minute(idp: Idp)
 
 @pytest.mark.anyio
 async def test_a_jwt_without_groups_takes_them_from_userinfo(idp: Idp):
-    token = idp.token(userinfo={"sub": "carl", "groups": ["vault-writers"]})
+    token = idp.token(userinfo={"sub": "ida", "groups": ["vault-writers"]})
     verified = await idp.verifier().verify_token(token)
     assert verified is not None
     assert verified.scopes == ["vault:read", "vault:write"]
@@ -260,7 +260,7 @@ async def test_a_token_that_names_its_groups_never_asks_userinfo(idp: Idp):
 @pytest.mark.anyio
 async def test_the_userinfo_answer_is_cached_per_token(idp: Idp):
     verifier = idp.verifier()
-    token = idp.token(userinfo={"sub": "carl", "groups": ["vault"]})
+    token = idp.token(userinfo={"sub": "ida", "groups": ["vault"]})
     await verifier.verify_token(token)
     await verifier.verify_token(token)
     assert idp.userinfo_calls == 1
@@ -270,7 +270,7 @@ async def test_the_userinfo_answer_is_cached_per_token(idp: Idp):
 
 @pytest.mark.anyio
 async def test_userinfo_without_a_known_group_refuses_the_token(idp: Idp):
-    token = idp.token(userinfo={"sub": "carl", "groups": ["staff"]})
+    token = idp.token(userinfo={"sub": "ida", "groups": ["staff"]})
     assert await idp.verifier().verify_token(token) is None
 
 
@@ -282,10 +282,10 @@ async def test_a_userinfo_call_the_provider_rejects_refuses_the_token(idp: Idp):
 
 @pytest.mark.anyio
 async def test_an_opaque_token_is_accepted_through_userinfo(idp: Idp):
-    verified = await idp.verifier().verify_token(idp.opaque_token(sub="carl", groups=["vault"]))
+    verified = await idp.verifier().verify_token(idp.opaque_token(sub="ida", groups=["vault"]))
     assert verified is not None
     assert verified.scopes == ["vault:read"]
-    assert verified.subject == "carl"
+    assert verified.subject == "ida"
     assert verified.expires_at is None
     assert verified.resource == "https://vault.example.com/mcp"
 
@@ -447,7 +447,7 @@ async def test_a_token_the_provider_will_not_describe_is_refused_by_the_endpoint
 @pytest.mark.anyio
 async def test_an_opaque_token_reaches_the_tools(vault: Vault, idp: Idp, monkeypatch):
     app = oidc_app(vault, idp, monkeypatch)
-    async with session(app, idp.opaque_token(sub="carl", groups=["vault"])) as opened:
+    async with session(app, idp.opaque_token(sub="ida", groups=["vault"])) as opened:
         await opened.initialize()
         listing = await opened.call(2, "tools/list", {})
     assert "search" in {tool["name"] for tool in listing["result"]["tools"]}

@@ -1,11 +1,11 @@
 ---
-title: "Greenhouse: gammal bokningsplan"
+title: "Orchard: gammal bokningsplan"
 date: 2026-03-01
 updated: @@D400@@
-tags: [greenhouse, booking]
+tags: [orchard, booking]
 status: complete
 kind: task
-area: "[[greenhouse]]"
+area: "[[orchard]]"
 ---
 
-Den första planen för bokning i greenhouse. Avslutad och arkiverad.
+Den första planen för bokning i orchard. Avslutad och arkiverad.

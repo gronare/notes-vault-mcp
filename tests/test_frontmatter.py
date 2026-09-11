@@ -11,9 +11,9 @@ NOTE = """---
 title: Test
 date: 2026-01-02
 updated: 2026-02-03
-tags: [greenhouse, ci]
+tags: [orchard, ci]
 status: active
-area: "[[greenhouse]]"
+area: "[[orchard]]"
 ---
 
 Body line.
@@ -29,7 +29,7 @@ def test_parse_returns_mapping_and_body():
     frontmatter, body = parse(NOTE)
     assert frontmatter["title"] == "Test"
     assert frontmatter["date"] == dt.date(2026, 1, 2)
-    assert frontmatter["tags"] == ["greenhouse", "ci"]
+    assert frontmatter["tags"] == ["orchard", "ci"]
     assert body.strip() == "Body line."
 
 
@@ -50,9 +50,9 @@ def test_dump_keeps_key_order_dates_and_inline_tags():
         "title: Test",
         "date: 2026-01-02",
         "updated: 2026-02-03",
-        "tags: [greenhouse, ci]",
+        "tags: [orchard, ci]",
         "status: active",
-        'area: "[[greenhouse]]"',
+        'area: "[[orchard]]"',
     ]
 
 
@@ -64,8 +64,8 @@ def test_dump_round_trips_through_parse():
 
 
 def test_dump_quotes_a_title_with_a_colon():
-    text = dump({"title": "Greenhouse: plan"}, "body")
-    assert 'title: "Greenhouse: plan"' in text
+    text = dump({"title": "Orchard: plan"}, "body")
+    assert 'title: "Orchard: plan"' in text
 
 
 def test_validate_accepts_a_complete_note(schema: Schema):
@@ -101,7 +101,7 @@ def test_validate_requires_area_in_the_configured_folders(schema: Schema):
 
 def test_validate_requires_area_to_be_a_wikilink(schema: Schema):
     frontmatter, _ = parse(NOTE)
-    frontmatter["area"] = "greenhouse"
+    frontmatter["area"] = "orchard"
     assert any("must be a wikilink" in problem for problem in validate(frontmatter, "Projects/t.md", schema))
 
 
@@ -109,5 +109,5 @@ def test_validate_checks_the_tag_vocabulary_only_when_strict(schema: Schema):
     frontmatter, _ = parse(NOTE)
     frontmatter["tags"] = ["hittepå"]
     assert validate(frontmatter, "Projects/t.md", schema) == []
-    strict = Schema({**schema.data, "tags": {"strict": True, "vocabulary": ["greenhouse"]}})
+    strict = Schema({**schema.data, "tags": {"strict": True, "vocabulary": ["orchard"]}})
     assert any("hittepå" in problem for problem in validate(frontmatter, "Projects/t.md", strict))

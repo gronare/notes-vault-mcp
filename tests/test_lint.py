@@ -31,12 +31,12 @@ def test_unknown_tags_are_silent_while_the_vocabulary_is_open(vault: Vault):
 
 
 def test_unknown_tags_are_reported_when_strict(vault: Vault):
-    vault.schema.data["tags"] = {"strict": True, "vocabulary": ["greenhouse"]}
-    assert any("k3s" in entry for entry in groups(vault)["unknown_tags"])
+    vault.schema.data["tags"] = {"strict": True, "vocabulary": ["orchard"]}
+    assert any("cluster" in entry for entry in groups(vault)["unknown_tags"])
 
 
 def test_unresolved_links_name_the_source_and_the_target(vault: Vault):
-    assert "Projects/greenhouse-draft.md -> [[saknad-not]]" in groups(vault)["unresolved_links"]
+    assert "Projects/orchard-draft.md -> [[saknad-not]]" in groups(vault)["unresolved_links"]
 
 
 def test_orphans_ignore_the_log_and_archive_folders(vault: Vault):
@@ -46,11 +46,11 @@ def test_orphans_ignore_the_log_and_archive_folders(vault: Vault):
 
 
 def test_stale_active_reports_an_old_open_task(vault: Vault):
-    assert any("Projects/homelab-stale.md" in entry for entry in groups(vault)["stale_active"])
+    assert any("Projects/workshop-stale.md" in entry for entry in groups(vault)["stale_active"])
 
 
 def test_a_fresh_open_task_is_not_stale(vault: Vault):
-    assert not any("greenhouse-fresh" in entry for entry in groups(vault)["stale_active"])
+    assert not any("orchard-fresh" in entry for entry in groups(vault)["stale_active"])
 
 
 def test_archive_status_mismatch_catches_an_archived_active_note(vault: Vault):
@@ -58,7 +58,7 @@ def test_archive_status_mismatch_catches_an_archived_active_note(vault: Vault):
 
 
 def test_duplicate_stems_name_both_keys(vault: Vault):
-    assert "homelab: Areas/homelab.md, Resources/homelab.md" in groups(vault)["duplicate_stems"]
+    assert "workshop: Areas/workshop.md, Resources/workshop.md" in groups(vault)["duplicate_stems"]
 
 
 def test_superseded_target_missing_is_reported(vault: Vault):
@@ -79,7 +79,7 @@ def test_the_lint_note_carries_a_complete_frontmatter(vault: Vault):
 
 
 def test_the_repo_log_is_not_a_duplicate_stem(vault: Vault):
-    assert not any(entry.startswith("greenhouse:") for entry in groups(vault)["duplicate_stems"])
+    assert not any(entry.startswith("orchard:") for entry in groups(vault)["duplicate_stems"])
 
 
 def test_a_note_with_an_area_link_is_connected_not_orphaned(vault: Vault):
@@ -88,8 +88,8 @@ def test_a_note_with_an_area_link_is_connected_not_orphaned(vault: Vault):
     notes.write(
         vault,
         "Resources/lonely-trap.md",
-        "---\ntitle: Ensam fälla\ndate: 2026-07-01\nupdated: 2026-07-01\ntags: [greenhouse]\nstatus: active\n"
-        'kind: trap\narea: "[[greenhouse]]"\n---\n\nIngen länkar hit, men area gör den till en del av grafen.\n',
+        "---\ntitle: Ensam fälla\ndate: 2026-07-01\nupdated: 2026-07-01\ntags: [orchard]\nstatus: active\n"
+        'kind: trap\narea: "[[orchard]]"\n---\n\nIngen länkar hit, men area gör den till en del av grafen.\n',
     )
     assert "Resources/lonely-trap.md" not in groups(vault)["orphans"]
 
@@ -97,7 +97,7 @@ def test_a_note_with_an_area_link_is_connected_not_orphaned(vault: Vault):
 def test_lint_park_stale_moves_old_open_notes_and_reports_them(vault: Vault, vault_dir: Path, capsys):
     assert main(["lint", "--park-stale"]) == 0
     out = capsys.readouterr().out
-    assert "## parked" in out and "Projects/homelab-stale.md" in out
+    assert "## parked" in out and "Projects/workshop-stale.md" in out
     assert "stale_active" not in out
-    frontmatter, _ = parse((vault_dir / "Projects/homelab-stale.md").read_text(encoding="utf-8"))
+    frontmatter, _ = parse((vault_dir / "Projects/workshop-stale.md").read_text(encoding="utf-8"))
     assert frontmatter["status"] == "backlog"

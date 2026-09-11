@@ -12,7 +12,7 @@ from notes_vault_mcp.index import Index
 from notes_vault_mcp.server import build_server
 from notes_vault_mcp.vault import Vault, open_vault
 
-NOTE = "---\ntitle: Probe\ndate: 2026-08-01\nupdated: 2026-08-01\ntags: [greenhouse]\nstatus: active\n---\n\nrad\n"
+NOTE = "---\ntitle: Probe\ndate: 2026-08-01\nupdated: 2026-08-01\ntags: [orchard]\nstatus: active\n---\n\nrad\n"
 
 
 def hold_write_lock(path: Path) -> sqlite3.Connection:

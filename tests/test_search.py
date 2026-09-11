@@ -13,22 +13,22 @@ def run(vault: Vault, query: str, **kwargs):
 
 
 def test_terms_are_anded(vault: Vault):
-    found = keys(run(vault, "greenhouse bokning"))
+    found = keys(run(vault, "orchard bokning"))
     assert "Resources/booking-trap.md" in found
-    assert "Projects/greenhouse-draft.md" not in found
-    assert "Areas/homelab.md" not in found
+    assert "Projects/orchard-draft.md" not in found
+    assert "Areas/workshop.md" not in found
 
 
 def test_synonyms_from_the_vault_schema_are_expanded(vault: Vault):
-    assert keys(run(vault, "komponent")) == ["Projects/greenhouse-fresh.md"]
+    assert keys(run(vault, "komponent")) == ["Projects/orchard-fresh.md"]
 
 
 def test_terms_match_as_prefixes(vault: Vault):
-    assert "Projects/greenhouse-fresh.md" in keys(run(vault, "bokning"))
+    assert "Projects/orchard-fresh.md" in keys(run(vault, "bokning"))
 
 
 def test_diacritics_are_folded(vault: Vault):
-    assert "Areas/greenhouse.md" in keys(run(vault, "domän"))
+    assert "Areas/orchard.md" in keys(run(vault, "domän"))
 
 
 def test_a_sha_looks_up_the_notes_that_mention_it(vault: Vault):
@@ -40,13 +40,13 @@ def test_a_sha_prefix_finds_the_same_note(vault: Vault):
 
 
 def test_archive_is_hidden_and_counted(vault: Vault):
-    result = run(vault, "greenhouse")
+    result = run(vault, "orchard")
     assert result.hidden_archive == 2
     assert not any(key.startswith("Archive/") for key in keys(result))
 
 
 def test_archive_is_returned_when_asked_for(vault: Vault):
-    result = run(vault, "greenhouse", include_archive=True)
+    result = run(vault, "orchard", include_archive=True)
     assert result.hidden_archive == 0
     assert "Archive/old-plan.md" in keys(result)
 
@@ -63,43 +63,43 @@ def test_superseded_is_returned_when_asked_for(vault: Vault):
 
 
 def test_folder_weight_puts_the_system_note_first(vault: Vault):
-    assert keys(run(vault, "flottkod"))[0] == "Areas/greenhouse.md"
+    assert keys(run(vault, "lundkod"))[0] == "Areas/orchard.md"
 
 
 def test_limit_is_respected(vault: Vault):
-    result = run(vault, "greenhouse", limit=2)
+    result = run(vault, "orchard", limit=2)
     assert len(result.rows) == 2
     assert result.total == 5
 
 
 def test_folder_filter_narrows_the_result(vault: Vault):
-    assert keys(run(vault, "greenhouse", folder="Log")) == ["Log/greenhouse-log.md"]
+    assert keys(run(vault, "orchard", folder="Log")) == ["Log/orchard-log.md"]
 
 
 def test_status_filter_narrows_the_result(vault: Vault):
-    assert keys(run(vault, "greenhouse", status="draft")) == ["Projects/greenhouse-draft.md"]
+    assert keys(run(vault, "orchard", status="draft")) == ["Projects/orchard-draft.md"]
 
 
 def test_tag_filter_narrows_the_result(vault: Vault):
-    assert keys(run(vault, "greenhouse", tag="ui")) == ["Projects/greenhouse-fresh.md"]
+    assert keys(run(vault, "orchard", tag="ui")) == ["Projects/orchard-fresh.md"]
 
 
 def test_kind_filter_narrows_the_result(vault: Vault):
-    assert keys(run(vault, "greenhouse", kind="system")) == ["Areas/greenhouse.md"]
+    assert keys(run(vault, "orchard", kind="system")) == ["Areas/orchard.md"]
 
 
 def test_path_prefix_filter_narrows_the_result(vault: Vault):
-    found = keys(run(vault, "release", path_prefix="~/projects/greenhouse"))
-    assert "Areas/homelab.md" not in found
-    assert "Projects/greenhouse-draft.md" in found
+    found = keys(run(vault, "release", path_prefix="~/projects/orchard"))
+    assert "Areas/workshop.md" not in found
+    assert "Projects/orchard-draft.md" in found
 
 
 def test_a_quoted_phrase_stays_a_phrase(vault: Vault):
-    assert keys(run(vault, '"stomme-addons och"')) == ["Projects/greenhouse-fresh.md"]
+    assert keys(run(vault, '"frame-addons och"')) == ["Projects/orchard-fresh.md"]
 
 
 def test_render_states_the_counts_in_the_header(vault: Vault):
-    text = render(run(vault, "greenhouse", limit=2))
+    text = render(run(vault, "orchard", limit=2))
     assert text.splitlines()[0] == "2 of 5 (archive: 2 hidden, superseded: 0 hidden)"
 
 

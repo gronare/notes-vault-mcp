@@ -150,14 +150,14 @@ def test_forwarded_takes_header_typ_claims_and_prefix_from_the_environment(
         monkeypatch,
         proxy,
         tmp_path,
-        VAULT_IDENTITY_HEADER="X-Auctionet-Identity",
+        VAULT_IDENTITY_HEADER="X-Gatekeeper-Identity",
         VAULT_IDENTITY_TYP=TYP,
         VAULT_IDENTITY_WRITE_CLAIMS="vault vault:write",
         VAULT_IDENTITY_READ_CLAIMS="vault-viewer",
         VAULT_SUBJECT_PREFIX="/employees/",
     )
     settings = auth_config("forwarded")
-    assert settings.identity_header == "X-Auctionet-Identity"
+    assert settings.identity_header == "X-Gatekeeper-Identity"
     assert settings.identity_typ == TYP
     assert settings.write_claims == ("vault", "vault:write")
     assert settings.read_claims == ("vault-viewer",)
@@ -230,9 +230,9 @@ async def test_an_identity_without_the_entitlement_gets_403(vaults: SubjectVault
 
 @pytest.mark.anyio
 async def test_the_header_name_comes_from_the_configuration(vaults: SubjectVaults, proxy: Proxy, tmp_path: Path):
-    app = app_for(vaults, proxy, tmp_path, identity_header="X-Auctionet-Identity")
+    app = app_for(vaults, proxy, tmp_path, identity_header="X-Gatekeeper-Identity")
     async with session(app, "") as opened:
-        opened.headers["X-Auctionet-Identity"] = proxy.token()
+        opened.headers["X-Gatekeeper-Identity"] = proxy.token()
         listing = await opened.call(1, "tools/list", {})
     assert "obsidian_access" in {tool["name"] for tool in listing["result"]["tools"]}
 
@@ -341,7 +341,7 @@ async def test_everything_sits_under_the_public_url_path(vaults: SubjectVaults, 
 
 def test_a_subject_that_is_not_a_plain_identifier_is_hashed():
     assert subject_key("1042") == "1042"
-    assert subject_key("carl.green@example.com") == "carl.green@example.com"
+    assert subject_key("ida.lind@example.com") == "ida.lind@example.com"
     hashed = subject_key("../../etc")
     assert len(hashed) == 16 and "/" not in hashed and "." not in hashed
 

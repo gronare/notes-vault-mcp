@@ -32,32 +32,32 @@ def test_periods_due_adds_the_previous_month_in_the_first_week():
 
 
 def test_period_key_follows_the_log_folder(vault: Vault):
-    assert vault.schema.period_key("greenhouse", "2026-08") == "Log/greenhouse-2026-08.md"
+    assert vault.schema.period_key("orchard", "2026-08") == "Log/orchard-2026-08.md"
 
 
 def test_write_page_creates_the_month_page_with_the_log_area(vault: Vault, vault_dir: Path, tmp_path):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    assert changelog.write_page(vault, "greenhouse", "2026-08", repo) is True
-    frontmatter, body = parse((vault_dir / "Log/greenhouse-2026-08.md").read_text(encoding="utf-8"))
-    assert frontmatter["area"] == "[[greenhouse]]"
+    repo = make_repo(tmp_path / "repos", "orchard")
+    assert changelog.write_page(vault, "orchard", "2026-08", repo) is True
+    frontmatter, body = parse((vault_dir / "Log/orchard-2026-08.md").read_text(encoding="utf-8"))
+    assert frontmatter["area"] == "[[orchard]]"
     assert frontmatter["status"] == "complete"
     assert frontmatter["kind"] == "log"
     assert changelog.GENERATED_START in body and changelog.GENERATED_END in body
     assert "Release-grinden mäter A/B" in body
-    assert "[[greenhouse-fresh]]" in body
+    assert "[[orchard-fresh]]" in body
 
 
 def test_write_page_lists_only_the_repos_own_notes(vault: Vault, vault_dir: Path, tmp_path):
-    repo = make_repo(tmp_path / "repos", "stomme")
-    changelog.write_page(vault, "stomme", "2026-08", repo)
-    body = (vault_dir / "Log/stomme-2026-08.md").read_text(encoding="utf-8")
-    assert "[[greenhouse-fresh]]" not in body
+    repo = make_repo(tmp_path / "repos", "frame")
+    changelog.write_page(vault, "frame", "2026-08", repo)
+    body = (vault_dir / "Log/frame-2026-08.md").read_text(encoding="utf-8")
+    assert "[[orchard-fresh]]" not in body
 
 
 def test_write_page_keeps_prose_outside_the_markers_and_refreshes_the_block(vault: Vault, vault_dir: Path, tmp_path):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    changelog.write_page(vault, "greenhouse", THIS_MONTH, repo)
-    page = vault_dir / "Log/greenhouse-2026-08.md".replace("2026-08", THIS_MONTH)
+    repo = make_repo(tmp_path / "repos", "orchard")
+    changelog.write_page(vault, "orchard", THIS_MONTH, repo)
+    page = vault_dir / "Log/orchard-2026-08.md".replace("2026-08", THIS_MONTH)
     frontmatter, body = parse(page.read_text(encoding="utf-8"))
     assert frontmatter["status"] == "active"
     from notes_vault_mcp.frontmatter import dump
@@ -65,7 +65,7 @@ def test_write_page_keeps_prose_outside_the_markers_and_refreshes_the_block(vaul
     page.write_text(dump(frontmatter, "## Sammanfattning\n\nEn månad av prosa.\n\n" + body), encoding="utf-8")
     vault.index.sync(force=True)
     sha = commit(repo, "Second commit")
-    assert changelog.write_page(vault, "greenhouse", THIS_MONTH, repo) is True
+    assert changelog.write_page(vault, "orchard", THIS_MONTH, repo) is True
     text = page.read_text(encoding="utf-8")
     assert "En månad av prosa." in text
     assert sha in text
@@ -73,35 +73,35 @@ def test_write_page_keeps_prose_outside_the_markers_and_refreshes_the_block(vaul
 
 
 def test_write_page_is_a_no_op_when_nothing_changed(vault: Vault, vault_dir: Path, tmp_path):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    changelog.write_page(vault, "greenhouse", "2026-08", repo)
-    before = (vault_dir / "Log/greenhouse-2026-08.md").read_text(encoding="utf-8")
-    assert changelog.write_page(vault, "greenhouse", "2026-08", repo) is False
-    assert (vault_dir / "Log/greenhouse-2026-08.md").read_text(encoding="utf-8") == before
+    repo = make_repo(tmp_path / "repos", "orchard")
+    changelog.write_page(vault, "orchard", "2026-08", repo)
+    before = (vault_dir / "Log/orchard-2026-08.md").read_text(encoding="utf-8")
+    assert changelog.write_page(vault, "orchard", "2026-08", repo) is False
+    assert (vault_dir / "Log/orchard-2026-08.md").read_text(encoding="utf-8") == before
 
 
 def test_write_all_covers_the_remembered_repos_and_skips_a_vanished_checkout(vault: Vault, vault_dir: Path, tmp_path):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    vault.index.remember_repo("greenhouse", str(repo))
+    repo = make_repo(tmp_path / "repos", "orchard")
+    vault.index.remember_repo("orchard", str(repo))
     vault.index.remember_repo("gone", str(tmp_path / "repos" / "gone"))
     written = changelog.write_all(vault, periods=["2026-08"])
-    assert written == ["Log/greenhouse-2026-08.md"]
+    assert written == ["Log/orchard-2026-08.md"]
     assert not (vault_dir / "Log/gone-2026-08.md").exists()
 
 
 def test_session_start_remembers_the_repo(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
+    repo = make_repo(tmp_path / "repos", "orchard")
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "session-start"]) == 0
-    assert ("greenhouse", str(repo.resolve())) in vault.index.known_repos()
+    assert ("orchard", str(repo.resolve())) in vault.index.known_repos()
 
 
 def test_stop_writes_the_month_pages_once_a_day(
     vault: Vault, vault_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    vault.index.remember_repo("greenhouse", str(repo))
-    page = vault_dir / f"Log/greenhouse-{THIS_MONTH}.md"
+    repo = make_repo(tmp_path / "repos", "orchard")
+    vault.index.remember_repo("orchard", str(repo))
+    page = vault_dir / f"Log/orchard-{THIS_MONTH}.md"
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "stop"]) == 0
     assert json.loads(capsys.readouterr().out)["decision"] == "block"
@@ -118,19 +118,19 @@ def test_stop_writes_the_month_pages_once_a_day(
 
 
 def test_changelog_all_writes_the_pages_for_a_named_period(vault: Vault, vault_dir: Path, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    vault.index.remember_repo("greenhouse", str(repo))
+    repo = make_repo(tmp_path / "repos", "orchard")
+    vault.index.remember_repo("orchard", str(repo))
     assert main(["changelog", "--all", "2026-08"]) == 0
-    assert "wrote Log/greenhouse-2026-08.md" in capsys.readouterr().out
-    assert (vault_dir / "Log/greenhouse-2026-08.md").exists()
+    assert "wrote Log/orchard-2026-08.md" in capsys.readouterr().out
+    assert (vault_dir / "Log/orchard-2026-08.md").exists()
 
 
 def test_changelog_write_writes_one_page(vault: Vault, vault_dir: Path, tmp_path, capsys):
-    repo = make_repo(tmp_path / "repos", "greenhouse")
-    assert main(["changelog", "greenhouse", "2026-08", "--repo-path", str(repo), "--write"]) == 0
-    assert "wrote Log/greenhouse-2026-08.md" in capsys.readouterr().out
-    assert main(["changelog", "greenhouse", "2026-08", "--repo-path", str(repo), "--write"]) == 0
-    assert "unchanged Log/greenhouse-2026-08.md" in capsys.readouterr().out
+    repo = make_repo(tmp_path / "repos", "orchard")
+    assert main(["changelog", "orchard", "2026-08", "--repo-path", str(repo), "--write"]) == 0
+    assert "wrote Log/orchard-2026-08.md" in capsys.readouterr().out
+    assert main(["changelog", "orchard", "2026-08", "--repo-path", str(repo), "--write"]) == 0
+    assert "unchanged Log/orchard-2026-08.md" in capsys.readouterr().out
 
 
 def test_changelog_without_a_repo_or_all_fails_loudly(vault: Vault, capsys):

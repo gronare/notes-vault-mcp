@@ -55,7 +55,7 @@ async def test_the_instructions_carry_the_schema(vault: Vault):
 @pytest.mark.anyio
 async def test_search_returns_rendered_rows(vault: Vault):
     async with Client(build_server(vault)) as client:
-        text = await text_of(client, "search", {"query": "greenhouse", "limit": 3})
+        text = await text_of(client, "search", {"query": "orchard", "limit": 3})
     assert text.startswith("3 of 5 (archive: 2 hidden, superseded: 0 hidden)")
 
 
@@ -63,7 +63,7 @@ async def test_search_returns_rendered_rows(vault: Vault):
 async def test_write_then_read_round_trips(vault: Vault):
     content = (
         "---\ntitle: Via MCP\ndate: 2026-08-01\nupdated: 2026-08-01\n"
-        'tags: [greenhouse]\nstatus: active\narea: "[[greenhouse]]"\n---\n\nKropp.\n'
+        'tags: [orchard]\nstatus: active\narea: "[[orchard]]"\n---\n\nKropp.\n'
     )
     async with Client(build_server(vault)) as client:
         written = await text_of(client, "write_file", {"path": "Projects/via-mcp.md", "content": content})
@@ -98,7 +98,7 @@ async def test_a_rejected_write_reports_the_problem(vault: Vault):
 @pytest.mark.anyio
 async def test_context_and_lint_return_text(vault: Vault):
     async with Client(build_server(vault)) as client:
-        context = await text_of(client, "context", {"repo": "greenhouse"})
+        context = await text_of(client, "context", {"repo": "orchard"})
         findings = await text_of(client, "lint", {})
     assert "## open tasks" in context
     assert "## stale_active" in findings

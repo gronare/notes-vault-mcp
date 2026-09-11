@@ -8,18 +8,18 @@ import pytest
 from notes_vault_mcp.search import render, search
 from notes_vault_mcp.vault import Vault
 
-QUERIES = json.loads((Path(__file__).parent / "fixtures" / "real-queries.json").read_text(encoding="utf-8"))
+QUERIES = json.loads((Path(__file__).parent / "fixtures" / "queries.json").read_text(encoding="utf-8"))
 LIMIT = 15
 MAX_RENDERED_CHARS = 6000
 
 
-def test_the_fixture_carries_the_recorded_queries():
+def test_the_fixture_carries_the_synthetic_queries():
     assert len(QUERIES) > 100
     assert all("query" in entry for entry in QUERIES)
 
 
 @pytest.mark.parametrize("entry", QUERIES, ids=lambda entry: entry["query"][:40])
-def test_every_recorded_query_stays_within_its_limit(vault: Vault, entry: dict):
+def test_every_query_stays_within_its_limit(vault: Vault, entry: dict):
     result = search(
         vault.index,
         vault.schema,
