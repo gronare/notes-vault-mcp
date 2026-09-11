@@ -139,8 +139,8 @@ log:
 ```
 
 `file_format` takes a single `{repo}` placeholder, and the default suffix is what keeps the log clear
-of the hub note: with `Areas/greenhouse.md` and `Log/greenhouse.md` both in the vault, Obsidian cannot
-resolve `[[greenhouse]]`. Every place that builds the log path reads this setting — `log_append`, the
+of the hub note: with `Areas/myapp.md` and `Log/myapp.md` both in the vault, Obsidian cannot
+resolve `[[myapp]]`. Every place that builds the log path reads this setting — `log_append`, the
 log tail in `context`, the stop hook's unlogged-commit check, `changelog` and `lint` — so changing it
 moves all of them at once. Rename the existing files to match when you change it.
 
@@ -220,8 +220,8 @@ with the three ways to settle each (close, a dated line, or park in the backlog)
 notes-vault-mcp serve --transport stdio          # the default
 notes-vault-mcp sync --rebuild                   # drop the index and read every note again
 notes-vault-mcp search "bokning" --limit 5       # the same ranking, from a shell
-notes-vault-mcp changelog greenhouse 2026-08 --repo-path ~/projects/greenhouse
-notes-vault-mcp changelog greenhouse 2026-08 --repo-path ~/projects/greenhouse --write
+notes-vault-mcp changelog myapp 2026-08 --repo-path ~/projects/myapp
+notes-vault-mcp changelog myapp 2026-08 --repo-path ~/projects/myapp --write
 notes-vault-mcp changelog --all                  # this month (and last month during its first week)
 ```
 
@@ -235,7 +235,7 @@ stop hook runs that once a day, so the pages stay current without a cron.
 ## Backlog
 
 ```sh
-notes-vault-mcp backlog --area greenhouse --priority high
+notes-vault-mcp backlog --area myapp --priority high
 ```
 
 A backlog item is a task note with `status: backlog`, an `area`, a one-line `summary`, an optional

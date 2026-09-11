@@ -93,7 +93,7 @@ class SubjectVaults:
         cache: Path | None = None,
         prefix: str = "users",
         dav_url: str = "",
-        schema_template: str = "schema-en.yml",
+        schema_template: str = "schema.yml",
         idle_seconds: float = IDLE_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:

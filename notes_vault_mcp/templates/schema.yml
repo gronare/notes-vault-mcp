@@ -1,11 +1,11 @@
 version: 1
-language: sv
+language: en
 folders:
-  Areas:     { kind: system,    weight: 3.0, description: "En levande not per system eller delsystem. Bara nuläge. Grafens nav." }
-  Resources: { kind: reference, weight: 2.0, description: "Fällor, how-tos och beslut med skäl. Skrivs en gång, gäller tills superseded_by." }
-  Projects:  { kind: task,      weight: 1.0, description: "Öppet arbete som spänner över sessioner. Stängs med close." }
-  Log:       { kind: log,       weight: 1.0, description: "Append-only logg per repo och kompilerade månadssidor." }
-  Archive:   { kind: archive,   weight: 0.3, searched: false, description: "Historik. Söks bara på begäran." }
+  Areas:     { kind: system,    weight: 3.0, description: "One living note per system or subsystem. Current state only. Hub of the graph." }
+  Resources: { kind: reference, weight: 2.0, description: "Gotchas, how-tos and decisions with rationale. Written once, valid until superseded_by." }
+  Projects:  { kind: task,      weight: 1.0, description: "Open work that spans sessions, and the backlog (status backlog). Closed with close." }
+  Log:       { kind: log,       weight: 1.0, description: "Append-only log per repo and compiled monthly pages." }
+  Archive:   { kind: archive,   weight: 0.3, searched: false, description: "History. Searched only on request." }
 frontmatter:
   required: [title, date, updated, tags, status]
   optional: [kind, area, summary, path, superseded_by, priority, source]
@@ -15,67 +15,8 @@ frontmatter:
   priority_values: [urgent, high, medium, low]
 tags:
   strict: false
-  vocabulary:
-    - greenhouse
-    - stomme
-    - stomme-addons
-    - stomme-themes
-    - stomme-cms-gateway
-    - gronare
-    - homelab
-    - dotfiles
-    - booking
-    - portal
-    - motor
-    - fleet
-    - cms
-    - themes
-    - addons
-    - ci
-    - deploy
-    - backup
-    - dns
-    - domain
-    - mail
-    - villkor
-    - avtal
-    - fakturering
-    - dac7
-    - stripe
-    - security
-    - gdpr
-    - ui
-    - design
-    - astro
-    - sveltia
-    - cloudflare
-    - k3s
-    - proxmox
-    - home-assistant
-    - mcp
-    - claude
-    - obsidian
-    - tests
-    - log
-synonyms:
-  - [bokning, booking]
-  - [avbokning, cancellation]
-  - [utcheckning, checkout]
-  - [villkor, terms]
-  - [avtal, contract]
-  - [fakturering, billing, invoicing, faktura, invoice]
-  - [tema, teman, theme, themes]
-  - [tillägg, addon, addons]
-  - [motor, engine]
-  - [flotta, fleet]
-  - [sajt, site]
-  - [kund, customer]
-  - [domän, domain]
-  - [mejl, mail, email]
-  - [körning, run]
-  - [översyn, review]
-  - [gäst, guest]
-  - [medlem, member]
+  vocabulary: []
+synonyms: []
 log:
   folder: Log
   file_format: "{repo}-log.md"

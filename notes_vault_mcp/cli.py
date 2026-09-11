@@ -192,7 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     revoke.set_defaults(func=command_tokens)
 
     queue = sub.add_parser("backlog", help="list the backlog, sorted by priority then age")
-    queue.add_argument("--area", help="a system note stem, or a family such as greenhouse")
+    queue.add_argument("--area", help="a system note stem, or the prefix a family of stems shares")
     queue.add_argument("--priority", help="urgent, high, medium or low")
     queue.set_defaults(func=command_backlog)
 

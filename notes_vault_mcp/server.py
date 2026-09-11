@@ -169,8 +169,8 @@ def build_server(
     @server.tool(
         name="backlog",
         description=(
-            "CHEAP — the backlog sorted by priority then age. Filter by area (a stem, or a family such as "
-            "greenhouse) and by priority."
+            "CHEAP — the backlog sorted by priority then age. Filter by area (a stem, or the prefix a family "
+            "of stems shares) and by priority."
         ),
     )
     def backlog_tool(area: str | None = None, priority: str | None = None, limit: int = 50) -> str:

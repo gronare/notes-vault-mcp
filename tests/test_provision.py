@@ -8,9 +8,7 @@ from notes_vault_mcp.backends.local import LocalBackend
 
 def test_initialize_writes_schema_bases_and_welcome(tmp_path: Path):
     backend = LocalBackend(tmp_path / "v")
-    written, kept = provision.initialize(
-        backend, schema_template="schema-en.yml", welcome={"DAV_URL": "https://x/dav/"}
-    )
+    written, kept = provision.initialize(backend, welcome={"DAV_URL": "https://x/dav/"})
     assert written == [
         ".vault/schema.yml",
         "Areas.base",
@@ -37,7 +35,7 @@ def test_initialize_keeps_what_exists_unless_forced(tmp_path: Path):
     assert backend.get(".vault/schema.yml")[0] == "version: 1\n"
     forced, _ = provision.initialize(backend, force=True)
     assert ".vault/schema.yml" in forced
-    assert "language: sv" in backend.get(".vault/schema.yml")[0]
+    assert "language: en" in backend.get(".vault/schema.yml")[0]
 
 
 def test_initialize_without_welcome_writes_no_welcome_note(tmp_path: Path):
