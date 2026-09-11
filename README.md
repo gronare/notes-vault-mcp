@@ -159,6 +159,7 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 | `read_file` | moderate | One note, prefixed with `etag: <version>`. A superseded note carries a warning callout. |
 | `obsidian_access` | write | `--auth forwarded` only. Mints the personal token Obsidian's Remotely Save plugin uses over WebDAV and shows it once; a new token revokes the previous one. |
 | `lint` | moderate | Reads every note and reports drift. |
+| `init` | write | Sets a vault up: writes `.vault/schema.yml` and the Obsidian Bases views into the root and keeps what exists; `force` overwrites. The plugin's `/vault:init` calls it. |
 | `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. Files that are not notes (`.vault/schema.yml`, `.base` views) are stored verbatim. |
 | `append_file` | write | Appends and bumps `updated`. Creates the note when missing. |
 | `set_status` | write | Changes a note's status without rewriting it: `backlog` with a priority parks it, `active` picks it up again. |

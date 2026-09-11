@@ -5,7 +5,7 @@ from collections.abc import Callable
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from notes_vault_mcp import notes
+from notes_vault_mcp import notes, provision
 from notes_vault_mcp.auth import AuthConfig
 from notes_vault_mcp.auth.personal import PersonalTokens
 from notes_vault_mcp.auth.scopes import ScopeError, require_write
@@ -216,6 +216,17 @@ def build_server(
     def lint_tool() -> str:
         return run(lambda vault: notes.lint(vault).render(), force=True)
 
+    @server.tool(
+        name="init",
+        description=(
+            "WRITE — sets a vault up: writes `.vault/schema.yml` and the Obsidian Bases views into the vault "
+            "root and keeps whatever already exists; force overwrites them, the schema included. Run once per "
+            "vault, right after installing."
+        ),
+    )
+    def init_tool(force: bool = False) -> str:
+        return run(lambda vault: _init(vault, force), write=True)
+
     if personal_tokens is not None:
 
         @server.tool(
@@ -230,6 +241,12 @@ def build_server(
             return run(lambda vault: _obsidian_access(personal_tokens, dav_url), write=True)
 
     return server
+
+
+def _init(vault: Vault, force: bool) -> str:
+    written, kept = provision.initialize(vault.backend, force=force)
+    lines = [f"wrote {key}" for key in written] + [f"kept {key} (force overwrites)" for key in kept]
+    return "\n".join(lines)
 
 
 def _obsidian_access(tokens: PersonalTokens, dav_url: str) -> str:

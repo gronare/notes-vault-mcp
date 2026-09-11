@@ -22,6 +22,7 @@ TOOL_NAMES = {
     "log_append",
     "context",
     "lint",
+    "init",
 }
 
 
@@ -143,3 +144,12 @@ async def test_http_passes_the_right_token_through():
     inner = _Unreached()
     assert await _collect(BearerToken(inner, "s3cret"), [(b"authorization", b"Bearer s3cret")]) == 200
     assert inner.called is True
+
+
+@pytest.mark.anyio
+async def test_init_keeps_what_exists_and_writes_the_rest(vault: Vault):
+    async with Client(build_server(vault)) as client:
+        first = await text_of(client, "init", {})
+        forced = await text_of(client, "init", {"force": True})
+    assert "wrote Log.base" in first and "kept .vault/schema.yml (force overwrites)" in first
+    assert "kept" not in forced and "wrote .vault/schema.yml" in forced
