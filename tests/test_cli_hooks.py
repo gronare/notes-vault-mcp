@@ -150,7 +150,7 @@ def test_stop_blocks_on_a_stale_note_the_session_touched(
     assert "systemMessage" not in payload
 
 
-def test_stop_warns_about_stale_notes_the_session_did_not_touch(
+def test_stop_stays_silent_about_stale_notes_the_session_did_not_touch(
     vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
 ):
     repo = make_repo(tmp_path / "repos", "homelab")
@@ -158,10 +158,7 @@ def test_stop_warns_about_stale_notes_the_session_did_not_touch(
     transcript = write_transcript(tmp_path / "t.jsonl", "write_file", {"path": "Projects/other.md"})
     feed(monkeypatch, {"cwd": str(repo), "transcript_path": str(transcript)})
     assert main(["hook", "stop"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert "decision" not in payload
-    assert "Projects/homelab-stale.md" in payload["systemMessage"]
-    assert "not touched this session" in payload["systemMessage"]
+    assert capsys.readouterr().out.strip() == ""
 
 
 def test_stop_treats_a_missing_transcript_as_nothing_touched(
@@ -171,12 +168,12 @@ def test_stop_treats_a_missing_transcript_as_nothing_touched(
     notes.log_append(vault, "homelab", "Bygget", commits=(head_sha(repo),))
     feed(monkeypatch, {"cwd": str(repo), "transcript_path": str(tmp_path / "missing.jsonl")})
     assert main(["hook", "stop"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert "decision" not in payload
-    assert "Projects/homelab-stale.md" in payload["systemMessage"]
+    assert capsys.readouterr().out.strip() == ""
 
 
-def test_stop_warns_and_blocks_in_the_same_payload(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
+def test_stop_blocks_on_an_unlogged_commit_without_naming_untouched_notes(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+):
     repo = make_repo(tmp_path / "repos", "homelab")
     feed(monkeypatch, {"cwd": str(repo)})
     assert main(["hook", "stop"]) == 0
@@ -184,7 +181,7 @@ def test_stop_warns_and_blocks_in_the_same_payload(vault: Vault, monkeypatch: py
     assert payload["decision"] == "block"
     assert head_sha(repo) in payload["reason"]
     assert "Projects/homelab-stale.md" not in payload["reason"]
-    assert "Projects/homelab-stale.md" in payload["systemMessage"]
+    assert "systemMessage" not in payload
 
 
 def test_stop_outside_a_git_repo_is_silent(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):

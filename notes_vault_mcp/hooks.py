@@ -13,7 +13,6 @@ from notes_vault_mcp.notes import OPEN_STATUSES, context, vault_paths_in
 from notes_vault_mcp.search import age_days, humanize_age
 from notes_vault_mcp.vault import Vault, open_vault
 
-STOP_STALE_DAYS = 14
 SHA_PREFIX_LENGTH = 7
 CHANGELOG_META = "changelog_ran_on"
 VAULT_HINT = (
@@ -105,7 +104,7 @@ def stale_open_notes(vault: Vault, repo: str, path: str) -> list[tuple[str, str]
     for note in bundle.tasks:
         if note.folder in task_folders and note.status in OPEN_STATUSES:
             days = age_days(note, now)
-            if days > STOP_STALE_DAYS:
+            if days > vault.schema.stale_after_days:
                 stale.append((note.key, f"{note.key} ({humanize_age(days)} old)"))
     return stale
 
@@ -142,13 +141,6 @@ def touched_notes(transcript_path: str | None) -> set[str]:
                 continue
             _collect_vault_paths(entry, touched)
     return touched
-
-
-def _stale_warning(stale: list[str]) -> str:
-    return (
-        f"vault: {len(stale)} open task notes older than {STOP_STALE_DAYS} days were not touched this "
-        "session: " + ", ".join(stale) + ". Close them, or say in them what is still open, when you next work on them."
-    )
 
 
 def _reason(commits: list[tuple[str, str]], stale: list[str], repo: str) -> str:
@@ -193,11 +185,6 @@ def stop(raw: str) -> str | None:
         vault.close()
     touched = touched_notes(data.get("transcript_path"))
     blocking = [label for key, label in stale if key in touched]
-    untouched = [label for key, label in stale if key not in touched]
-    payload: dict[str, str] = {}
-    if commits or blocking:
-        payload["decision"] = "block"
-        payload["reason"] = _reason(commits, blocking, repo)
-    if untouched:
-        payload["systemMessage"] = _stale_warning(untouched)
-    return json.dumps(payload) if payload else None
+    if not commits and not blocking:
+        return None
+    return json.dumps({"decision": "block", "reason": _reason(commits, blocking, repo)})

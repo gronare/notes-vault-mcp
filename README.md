@@ -189,11 +189,11 @@ returned — the commits touching that note's `path` since the note was last upd
 answer to "is this note still true?" before the agent believes it.
 
 `stop` blocks the end of a session that left work unrecorded: commits from the last 24 hours whose
-sha does not appear in the repo log, and open task notes older than 14 days that the session read or
-wrote (found through the vault tool calls in the session transcript). It returns
-`{"decision": "block", "reason": ...}`, or nothing at all when the vault is up to date. Stale notes
-the session did not touch are reported as a `systemMessage` warning instead, so old work elsewhere
-in the repo does not stop the session at hand. Set `VAULT_STOP_HOOK=off` to silence it.
+sha does not appear in the repo log, and open task notes older than the schema's `stale_after_days`
+that the session read or wrote (found through the vault tool calls in the session transcript). It
+returns `{"decision": "block", "reason": ...}`, or nothing at all when the vault is up to date. Stale
+notes the session did not touch are its business at the next session start, where `context` lists
+them as STALE, not at every stop. Set `VAULT_STOP_HOOK=off` to silence the hook.
 
 ```json
 {
