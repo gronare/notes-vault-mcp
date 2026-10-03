@@ -52,6 +52,7 @@ class AuthConfig:
     write_claims: tuple[str, ...] = (WRITE_SCOPE,)
     read_claims: tuple[str, ...] = (READ_SCOPE,)
     subject_prefix: str = DEFAULT_SUBJECT_PREFIX
+    allowed_hosts: tuple[str, ...] = ()
 
     @property
     def path_prefix(self) -> str:
@@ -59,7 +60,8 @@ class AuthConfig:
 
     @property
     def public_host(self) -> str:
-        return urlsplit(self.public_url).hostname or ""
+        url = self.public_url if "://" in self.public_url else f"//{self.public_url}"
+        return urlsplit(url).hostname or ""
 
     @property
     def resource_url(self) -> str:
@@ -101,12 +103,22 @@ def _words(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return tuple((env(name) or "").split()) or default
 
 
+def _allowed_hosts() -> tuple[str, ...]:
+    return tuple((env("VAULT_ALLOWED_HOSTS") or "").replace(",", " ").split())
+
+
 def auth_config(mode: AuthMode) -> AuthConfig:
+    hosts = _allowed_hosts()
     if mode == "bearer":
         token = env("VAULT_TOKEN")
         if not token:
             raise ConfigError("notes-vault-mcp: --auth bearer needs VAULT_TOKEN set")
-        return AuthConfig(mode="bearer", bearer_token=token)
+        return AuthConfig(
+            mode="bearer",
+            public_url=(env("VAULT_PUBLIC_URL") or "").rstrip("/"),
+            bearer_token=token,
+            allowed_hosts=hosts,
+        )
     public_url = (env("VAULT_PUBLIC_URL") or "").rstrip("/")
     if not public_url.startswith("https://") and not public_url.startswith("http://localhost"):
         raise ConfigError(NO_PUBLIC_URL.format(mode=mode))
@@ -122,6 +134,7 @@ def auth_config(mode: AuthMode) -> AuthConfig:
             read_group=env("VAULT_OIDC_READ_GROUP") or DEFAULT_READ_GROUP,
             write_group=env("VAULT_OIDC_WRITE_GROUP") or DEFAULT_WRITE_GROUP,
             idp_scopes=_words("VAULT_OIDC_SCOPES", DEFAULT_IDP_SCOPES),
+            allowed_hosts=hosts,
         )
     if mode == "forwarded":
         raw_key = env("VAULT_IDENTITY_PUBLIC_KEY")
@@ -142,5 +155,8 @@ def auth_config(mode: AuthMode) -> AuthConfig:
             write_claims=_words("VAULT_IDENTITY_WRITE_CLAIMS", (WRITE_SCOPE,)),
             read_claims=_words("VAULT_IDENTITY_READ_CLAIMS", (READ_SCOPE,)),
             subject_prefix=(env("VAULT_SUBJECT_PREFIX") or DEFAULT_SUBJECT_PREFIX).strip("/"),
+            allowed_hosts=hosts,
         )
-    return AuthConfig(mode="builtin", public_url=public_url, issuer=public_url, auth_dir=auth_dir())
+    return AuthConfig(
+        mode="builtin", public_url=public_url, issuer=public_url, auth_dir=auth_dir(), allowed_hosts=hosts
+    )

@@ -61,14 +61,22 @@ LOCAL_ORIGINS = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
 
 
 def transport_security(auth: AuthConfig) -> TransportSecuritySettings | None:
-    if not auth.public_url:
+    hosts: list[str] = []
+    origins: list[str] = []
+    if auth.public_host:
+        hosts += [auth.public_host, f"{auth.public_host}:*"]
+    if auth.public_url and "://" in auth.public_url:
+        parts = urlsplit(auth.public_url)
+        origins.append(f"{parts.scheme}://{parts.netloc}")
+    for name in auth.allowed_hosts:
+        hosts += [name, f"{name}:*"]
+        origins += [f"https://{name}", f"https://{name}:*", f"http://{name}", f"http://{name}:*"]
+    if not hosts:
         return None
-    parts = urlsplit(auth.public_url)
-    public_host = parts.hostname or ""
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[public_host, f"{public_host}:*", *LOCAL_HOSTS],
-        allowed_origins=[f"{parts.scheme}://{parts.netloc}", *LOCAL_ORIGINS],
+        allowed_hosts=[*hosts, *LOCAL_HOSTS],
+        allowed_origins=[*origins, *LOCAL_ORIGINS],
     )
 
 

@@ -83,6 +83,7 @@ passes its user config. The bare name wins when both are set.
 | `VAULT_CACHE_DIR` | no | Where the index lives, default `~/.cache/notes-vault-mcp`. |
 | `VAULT_SCHEMA` | no | Local path to a schema file, overriding the one in the vault. |
 | `VAULT_TOKEN` | for `--auth bearer` | Static bearer token for the LAN mode of `--transport http`. |
+| `VAULT_ALLOWED_HOSTS` | no | Extra `Host` header values the server answers on, space or comma separated. |
 | `VAULT_STOP_HOOK` | no | `off` disables the stop hook. |
 
 Set `VAULT_PATH` **or** the four `S3_*` variables. With neither, the server exits with one line
@@ -259,6 +260,12 @@ Streamable HTTP on `/mcp`, with four ways to authenticate: `--auth bearer` (the 
 else gets 401 before it reaches the server. `VAULT_TOKEN` is mandatory in this mode — the command
 refuses to start without it. It is a single token with full access, and claude.ai cannot use it.
 
+The `Host` header follows what the server listens on. Bound to localhost, only `localhost`,
+`127.0.0.1` and `[::1]` are answered, anything else gets `421`; bound to another address, every
+`Host` is answered. To keep the check on while serving a name of your own, a Kubernetes Service or
+a LAN hostname, list it in `VAULT_ALLOWED_HOSTS` or set `VAULT_PUBLIC_URL`: then that name and
+localhost are answered and the rest get `421`.
+
 `oidc` and `builtin` speak OAuth, which is what a Claude connector needs. See
 [Remote: claude.ai, Claude Desktop and mobile](#remote-claudeai-claude-desktop-and-mobile).
 
@@ -303,6 +310,7 @@ One server instance serves one vault.
 | `VAULT_OIDC_WRITE_GROUP` | oidc | Group granting `vault:read` and `vault:write`. Default `vault-writers`. |
 | `VAULT_OIDC_SCOPES` | oidc | Scopes the resource metadata advertises, so the client asks the provider for scopes it knows. Default `openid profile email groups`. When the access token carries no `groups`, the server asks the provider's userinfo endpoint. |
 | `VAULT_TOKEN` | bearer | The static token. |
+| `VAULT_ALLOWED_HOSTS` | all | Extra `Host` header values the server answers on, space or comma separated, for a Service name or a LAN hostname next to the public one. |
 | `VAULT_CACHE_DIR` | all | Where the index lives. Default `~/.cache/notes-vault-mcp`. |
 | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | all | The vault, unless `VAULT_PATH` names a local folder. |
 

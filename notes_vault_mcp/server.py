@@ -280,7 +280,7 @@ def run_http(vaults: Vault | VaultResolver, host: str, port: int, auth: AuthConf
 
     from notes_vault_mcp.auth.http import build_http_app
 
-    uvicorn.run(build_http_app(vaults, auth), host=host, port=port, log_level="info")
+    uvicorn.run(build_http_app(vaults, auth, host), host=host, port=port, log_level="info")
 
 
 def create_server() -> MCPServer:

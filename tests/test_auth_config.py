@@ -13,6 +13,7 @@ VARIABLES = (
     "VAULT_OIDC_READ_GROUP",
     "VAULT_OIDC_WRITE_GROUP",
     "VAULT_OIDC_SCOPES",
+    "VAULT_ALLOWED_HOSTS",
 )
 
 
@@ -31,6 +32,30 @@ def test_bearer_refuses_to_start_without_a_token():
 def test_bearer_takes_the_token_from_the_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VAULT_TOKEN", "s3cret")
     assert auth_config("bearer").bearer_token == "s3cret"
+
+
+def test_bearer_takes_a_public_url_without_demanding_https(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VAULT_TOKEN", "s3cret")
+    monkeypatch.setenv("VAULT_PUBLIC_URL", "http://home-vault-agents.home-vault.svc.cluster.local:8765")
+    assert auth_config("bearer").public_host == "home-vault-agents.home-vault.svc.cluster.local"
+
+
+def test_the_allowed_hosts_are_read_as_a_space_or_comma_separated_list(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VAULT_TOKEN", "s3cret")
+    monkeypatch.setenv("VAULT_ALLOWED_HOSTS", "vault.svc.cluster.local, vault.lan")
+    assert auth_config("bearer").allowed_hosts == ("vault.svc.cluster.local", "vault.lan")
+
+
+def test_the_allowed_hosts_are_empty_when_unset(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VAULT_TOKEN", "s3cret")
+    assert auth_config("bearer").allowed_hosts == ()
+
+
+def test_the_allowed_hosts_reach_the_oauth_modes_too(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
+    monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    monkeypatch.setenv("VAULT_ALLOWED_HOSTS", "vault.svc.cluster.local")
+    assert auth_config("oidc").allowed_hosts == ("vault.svc.cluster.local",)
 
 
 def test_oidc_refuses_to_start_without_a_public_url():
