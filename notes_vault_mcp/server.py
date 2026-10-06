@@ -21,8 +21,11 @@ EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError, ScopeE
 
 SEARCH_DESCRIPTION = (
     "CHEAP — start here. Full-text search over the local SQLite index of the vault; it never "
-    "downloads the whole vault. Matches title, summary, tags and body, folds diacritics, expands "
+    "downloads the whole vault. Matches file stem, title, summary, tags and body, folds diacritics, expands "
     'synonyms and accepts "quoted phrases". A bare commit sha looks up the notes that mention it. '
+    "A query that is exactly a note's stem, or its [[stem]] wikilink, puts that note first wherever it lives. "
+    "Every term is required; when no note has them all, it returns the notes matching the most terms and "
+    "says so in the header. "
     "Excludes the archive and superseded notes unless you ask for them, and reports how many it hid."
 )
 

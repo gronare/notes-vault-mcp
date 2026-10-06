@@ -162,13 +162,14 @@ class Schema:
         return float(self._search().get("recency_half_life_days", 90))
 
     @property
-    def bm25_weights(self) -> tuple[float, float, float, float]:
+    def bm25_weights(self) -> tuple[float, float, float, float, float]:
         search = self._search()
         return (
             float(search.get("title_weight", 10.0)),
             float(search.get("summary_weight", 5.0)),
             float(search.get("tags_weight", 3.0)),
             float(search.get("body_weight", 1.0)),
+            float(search.get("stem_weight", 20.0)),
         )
 
 
@@ -270,4 +271,5 @@ Workflow:
    priority; picking one up is setting its status to active.
 
 `search` excludes the archive and superseded notes unless you ask for them, and says how many it hid.
+A wikilink [[stem]] is a search on the stem: that note comes first, even from the archive.
 """

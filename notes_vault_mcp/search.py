@@ -21,6 +21,7 @@ class Row:
     note: Note
     score: float
     snippet: str = ""
+    terms: int = 0
 
 
 @dataclass
@@ -29,6 +30,12 @@ class SearchResult:
     total: int = 0
     hidden_archive: int = 0
     hidden_superseded: int = 0
+    term_count: int = 0
+    best_terms: int = 0
+
+    @property
+    def partial(self) -> bool:
+        return self.term_count > 0
 
 
 def terms_of(query: str) -> list[tuple[str, bool]]:
@@ -58,12 +65,23 @@ def _alternatives(term: str, is_phrase: bool, schema: Schema) -> list[str]:
     return alternatives
 
 
+def term_groups(query: str, schema: Schema) -> list[str]:
+    return ["(" + " OR ".join(_alternatives(term, is_phrase, schema)) + ")" for term, is_phrase in terms_of(query)]
+
+
 def match_expression(query: str, schema: Schema) -> str:
-    groups = []
-    for term, is_phrase in terms_of(query):
-        alternatives = _alternatives(term, is_phrase, schema)
-        groups.append("(" + " OR ".join(alternatives) + ")")
-    return " AND ".join(groups)
+    return " AND ".join(term_groups(query, schema))
+
+
+def stem_query(query: str) -> str | None:
+    terms = terms_of(query)
+    if len(terms) != 1:
+        return None
+    text = terms[0][0].strip()
+    if text.startswith("[[") and text.endswith("]]"):
+        text = text[2:-2].split("|", 1)[0].split("#", 1)[0]
+    stem = text.strip().rsplit("/", 1)[-1].removesuffix(".md")
+    return stem or None
 
 
 def parse_day(stamp: str) -> float | None:
@@ -143,12 +161,19 @@ def _matches_filters(
     return not (since and (note.updated or note.date) < since)
 
 
-def _fts_rows(index: Index, schema: Schema, query: str) -> list[tuple[Note, float, str]]:
+def _summary_row(note: Note) -> Row:
+    return Row(note=note, score=1.0, snippet=_clean_snippet(note.summary))
+
+
+def _fts_rows(index: Index, schema: Schema, query: str) -> list[Row]:
     expression = match_expression(query, schema)
     if not expression:
-        return [(note, 1.0, _clean_snippet(note.summary)) for note in index.all_notes()]
-    title_w, summary_w, tags_w, body_w = schema.bm25_weights
-    weights = f"{title_w}, {summary_w}, {tags_w}, {body_w}, 0.0"
+        return [_summary_row(note) for note in index.all_notes()]
+    return _fts_query(index, schema, expression)
+
+
+def _fts_query(index: Index, schema: Schema, expression: str) -> list[Row]:
+    weights = ", ".join(str(weight) for weight in (*schema.bm25_weights, 0.0))
     sql = f"""
         SELECT notes_fts.key AS key,
                -bm25(notes_fts, {weights}) AS base,
@@ -156,15 +181,31 @@ def _fts_rows(index: Index, schema: Schema, query: str) -> list[tuple[Note, floa
         FROM notes_fts WHERE notes_fts MATCH ?
     """
     rows = index.db.execute(sql, (expression,)).fetchall()
-    found: list[tuple[Note, float, str]] = []
+    found: list[Row] = []
     for row in rows:
         note = index.note(row["key"])
         if note is not None:
-            found.append((note, max(row["base"], 0.0001), _clean_snippet(row["snip"] or note.summary)))
+            found.append(
+                Row(note=note, score=max(row["base"], 0.0001), snippet=_clean_snippet(row["snip"] or note.summary))
+            )
     return found
 
 
-def _sha_rows(index: Index, query: str) -> list[tuple[Note, float, str]] | None:
+def _matching_keys(index: Index, expression: str) -> set[str]:
+    rows = index.db.execute("SELECT key FROM notes_fts WHERE notes_fts MATCH ?", (expression,)).fetchall()
+    return {row["key"] for row in rows}
+
+
+def _partial_rows(index: Index, schema: Schema, query: str) -> list[Row]:
+    groups = term_groups(query, schema)
+    found = _fts_query(index, schema, " OR ".join(groups))
+    matched = [_matching_keys(index, group) for group in groups]
+    for row in found:
+        row.terms = sum(row.note.key in keys for keys in matched)
+    return found
+
+
+def _sha_rows(index: Index, query: str) -> list[Row] | None:
     terms = terms_of(query)
     if len(terms) != 1 or terms[0][1] or not SHA_TOKEN_RE.match(terms[0][0]):
         return None
@@ -172,8 +213,25 @@ def _sha_rows(index: Index, query: str) -> list[tuple[Note, float, str]] | None:
     for key in index.keys_for_sha(terms[0][0]):
         note = index.note(key)
         if note is not None:
-            found.append((note, 1.0, _clean_snippet(note.summary)))
+            found.append(_summary_row(note))
     return found
+
+
+def _candidates(index: Index, schema: Schema, query: str) -> tuple[list[Row], bool]:
+    found = _sha_rows(index, query)
+    if found is None:
+        found = _fts_rows(index, schema, query)
+    if found or len(terms_of(query)) < 2:
+        return found, False
+    return _partial_rows(index, schema, query), True
+
+
+def _stem_rows(index: Index, query: str, candidates: list[Row]) -> list[Row]:
+    stem = stem_query(query)
+    if stem is None:
+        return []
+    by_key = {row.note.key: row for row in candidates}
+    return [by_key.get(note.key) or _summary_row(note) for note in index.notes_with_stem(stem)]
 
 
 def search(
@@ -191,16 +249,20 @@ def search(
     path_prefix: str | None = None,
     since: str | None = None,
 ) -> SearchResult:
-    candidates = _sha_rows(index, query)
-    if candidates is None:
-        candidates = _fts_rows(index, schema, query)
+    candidates, partial = _candidates(index, schema, query)
+    pinned = _stem_rows(index, query, candidates)
+    pinned_keys = {row.note.key for row in pinned}
+
+    def wanted(note: Note) -> bool:
+        return _matches_filters(note, folder, status, tag, kind, area, path_prefix, since)
 
     now = time.time()
     unsearched = set(schema.unsearched_folders)
     result = SearchResult()
     visible: list[Row] = []
-    for note, base, snippet in candidates:
-        if not _matches_filters(note, folder, status, tag, kind, area, path_prefix, since):
+    for row in candidates:
+        note = row.note
+        if note.key in pinned_keys or not wanted(note):
             continue
         if note.folder in unsearched and not include_archive:
             result.hidden_archive += 1
@@ -208,9 +270,14 @@ def search(
         if _is_superseded(note) and not include_superseded:
             result.hidden_superseded += 1
             continue
-        visible.append(Row(note=note, score=score_of(note, base, schema, now), snippet=snippet))
+        row.score = score_of(note, row.score, schema, now)
+        visible.append(row)
 
-    visible.sort(key=lambda row: (-row.score, row.note.key))
+    visible.sort(key=lambda row: (-row.terms, -row.score, row.note.key))
+    visible = [row for row in pinned if wanted(row.note)] + visible
+    if partial and visible:
+        result.term_count = len(terms_of(query))
+        result.best_terms = max(row.terms for row in visible)
     result.total = len(visible)
     result.rows = visible[:limit]
     return result
@@ -224,12 +291,17 @@ def render_row(row: Row, now: float) -> str:
     return f"{note.key} | {note.title} | {age} | {status} | {area} | {row.snippet}"
 
 
+def render_header(result: SearchResult) -> str:
+    hidden = f"(archive: {result.hidden_archive} hidden, superseded: {result.hidden_superseded} hidden)"
+    if result.partial:
+        terms = result.term_count
+        return f"0 matched all {terms} terms; {result.total} match some (best {result.best_terms} of {terms}) {hidden}"
+    return f"{len(result.rows)} of {result.total} {hidden}"
+
+
 def render(result: SearchResult) -> str:
     now = time.time()
-    header = (
-        f"{len(result.rows)} of {result.total} "
-        f"(archive: {result.hidden_archive} hidden, superseded: {result.hidden_superseded} hidden)"
-    )
+    header = render_header(result)
     if not result.rows:
         return header + "\nNo notes matched."
     return "\n".join([header, *[render_row(row, now) for row in result.rows]])

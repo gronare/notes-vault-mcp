@@ -38,3 +38,4 @@ search:
   summary_weight: 5.0
   tags_weight: 3.0
   body_weight: 1.0
+  stem_weight: 20.0

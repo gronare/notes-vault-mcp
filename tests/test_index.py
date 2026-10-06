@@ -1,9 +1,28 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
-from notes_vault_mcp.index import link_targets, path_list, shas_in
+from notes_vault_mcp.index import Index, link_targets, path_list, shas_in
+from notes_vault_mcp.search import search
 from notes_vault_mcp.vault import Vault
+
+OLD_FTS_SQL = """
+CREATE TABLE notes (
+  key TEXT PRIMARY KEY, version TEXT, mtime REAL, folder TEXT, stem TEXT,
+  title TEXT, summary TEXT, status TEXT, kind TEXT, area TEXT,
+  tags TEXT, paths TEXT, date TEXT, updated TEXT, superseded_by TEXT,
+  valid INT, error TEXT, size INT, priority TEXT, source TEXT
+);
+CREATE VIRTUAL TABLE notes_fts USING fts5(
+  title, summary, tags, body, key UNINDEXED,
+  tokenize="unicode61 remove_diacritics 2"
+);
+CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT);
+INSERT INTO notes(key, version, stem, title) VALUES('Areas/orchard.md', 'stale', 'orchard', 'orchard');
+INSERT INTO notes_fts(title, summary, tags, body, key) VALUES('orchard', '', '', '', 'Areas/orchard.md');
+INSERT INTO meta(k, v) VALUES('last_sync', '9999999999');
+"""
 
 
 class CountingBackend:
@@ -93,3 +112,21 @@ def test_link_targets_drop_alias_heading_and_folder():
 def test_path_list_splits_on_comma_space():
     assert path_list("~/a, /b")[:1] == ["~/a"]
     assert "/b" in path_list("~/a, /b")
+
+
+def test_an_index_without_the_stem_column_is_rebuilt_and_searchable_by_stem(vault: Vault, tmp_path: Path):
+    path = tmp_path / "old" / "index.sqlite"
+    path.parent.mkdir()
+    old = sqlite3.connect(path)
+    old.executescript(OLD_FTS_SQL)
+    old.close()
+    index = Index(path, vault.index.backend)
+    try:
+        assert "stem" in {row["name"] for row in index.db.execute("PRAGMA table_info(notes_fts)")}
+        assert index.all_notes() == []
+        index.sync()
+        found = search(index, vault.schema, "orchard-fresh")
+        assert [row.note.key for row in found.rows][0] == "Projects/orchard-fresh.md"
+        assert index.db.execute("SELECT key FROM notes_fts WHERE notes_fts MATCH 'stem:\"orchard fresh\"'").fetchone()
+    finally:
+        index.close()

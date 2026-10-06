@@ -168,7 +168,7 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 
 | Tool | Cost | What it does |
 | --- | --- | --- |
-| `search` | cheap | Full-text over the index. Title, summary, tags and body, with synonyms, prefixes, quoted phrases and folded diacritics. A bare commit sha finds the notes that mention it. Hides archive and superseded notes and says how many. |
+| `search` | cheap | Full-text over the index. File stem, title, summary, tags and body, with synonyms, prefixes, quoted phrases and folded diacritics. A query that is exactly a note's stem (or `[[stem]]`) puts that note first, even from the archive. Every term is required; when no note has them all, it returns the notes matching the most terms and the header says the result is partial. A bare commit sha finds the notes that mention it. Hides archive and superseded notes and says how many. |
 | `context` | cheap | The session-start call: the system notes covering a path, the open tasks, a triage list of open notes older than `stale_after_days` with the three ways to settle each, the backlog, the reference notes and the tail of the repo log, in one answer. |
 | `list_files` | cheap | Paths only. |
 | `read_file` | moderate | One note, prefixed with `etag: <version>`. A superseded note carries a warning callout. |

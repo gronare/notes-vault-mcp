@@ -20,6 +20,13 @@ OPEN_RETRY_PAUSE = 0.5
 SHA_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b")
 WIKILINK_RE = re.compile(r"\[\[([^\]\n]+)\]\]")
 
+FTS_SQL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+  title, summary, tags, body, stem, key UNINDEXED,
+  tokenize="unicode61 remove_diacritics 2"
+);
+"""
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS notes (
   key TEXT PRIMARY KEY, version TEXT, mtime REAL, folder TEXT, stem TEXT,
@@ -29,10 +36,6 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS notes_folder ON notes(folder);
 CREATE INDEX IF NOT EXISTS notes_stem ON notes(stem);
-CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-  title, summary, tags, body, key UNINDEXED,
-  tokenize="unicode61 remove_diacritics 2"
-);
 CREATE TABLE IF NOT EXISTS shas (sha TEXT, key TEXT);
 CREATE INDEX IF NOT EXISTS shas_sha ON shas(sha);
 CREATE TABLE IF NOT EXISTS links (src TEXT, target TEXT);
@@ -166,6 +169,10 @@ def _row_to_note(row: sqlite3.Row) -> Note:
     )
 
 
+def _casefold(text: str | None) -> str | None:
+    return text.casefold() if text else text
+
+
 class Index:
     def __init__(self, path: Path, backend: VaultBackend) -> None:
         self.path = Path(path)
@@ -173,6 +180,7 @@ class Index:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=BUSY_TIMEOUT_MS / 1000)
         self.db.row_factory = sqlite3.Row
+        self.db.create_function("casefold", 1, _casefold, deterministic=True)
         self.db.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         self._prepare_with_retry()
 
@@ -189,14 +197,25 @@ class Index:
 
     def _prepare(self) -> None:
         self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.executescript(SCHEMA_SQL)
-        present = {row["name"] for row in self.db.execute("PRAGMA table_info(notes)")}
+        self.db.executescript(SCHEMA_SQL + FTS_SQL)
+        present = self._columns("notes")
         for column in ADDED_COLUMNS:
             if column not in present:
                 self.db.execute(f"ALTER TABLE notes ADD COLUMN {column} TEXT")
-                self.db.execute("DELETE FROM notes")
-                self.db.execute("DELETE FROM notes_fts")
+                self._forget_notes()
+        if "stem" not in self._columns("notes_fts"):
+            self.db.execute("DROP TABLE notes_fts")
+            self.db.executescript(FTS_SQL)
+            self._forget_notes()
         self.db.commit()
+
+    def _columns(self, table: str) -> set[str]:
+        return {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})")}
+
+    def _forget_notes(self) -> None:
+        self.db.execute("DELETE FROM notes")
+        self.db.execute("DELETE FROM notes_fts")
+        self.db.execute("DELETE FROM meta WHERE k = 'last_sync'")
 
     def close(self) -> None:
         self.db.close()
@@ -249,8 +268,8 @@ class Index:
             ),
         )
         self.db.execute(
-            "INSERT INTO notes_fts(title, summary, tags, body, key) VALUES(?, ?, ?, ?, ?)",
-            (note.title, note.summary, " ".join(note.tags), body, note.key),
+            "INSERT INTO notes_fts(title, summary, tags, body, stem, key) VALUES(?, ?, ?, ?, ?, ?)",
+            (note.title, note.summary, " ".join(note.tags), body, note.stem, note.key),
         )
         self.db.executemany("INSERT INTO shas(sha, key) VALUES(?, ?)", [(sha, key) for sha in shas_in(text)])
         self.db.executemany("INSERT INTO links(src, target) VALUES(?, ?)", [(key, t) for t in link_targets(text)])
@@ -271,6 +290,12 @@ class Index:
     def all_notes(self) -> list[Note]:
         rows = self.db.execute(f"SELECT {NOTE_COLUMNS} FROM notes ORDER BY key").fetchall()
         return [_row_to_note(row) for row in rows]
+
+    def notes_with_stem(self, stem: str) -> list[Note]:
+        rows = self.db.execute(
+            f"SELECT {NOTE_COLUMNS} FROM notes WHERE casefold(stem) = ? ORDER BY key", (stem.casefold(),)
+        )
+        return [_row_to_note(row) for row in rows.fetchall()]
 
     def stems(self) -> set[str]:
         return {row["stem"].lower() for row in self.db.execute("SELECT stem FROM notes")}
