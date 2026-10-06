@@ -24,6 +24,11 @@ INSERT INTO notes_fts(title, summary, tags, body, key) VALUES('orchard', '', '',
 INSERT INTO meta(k, v) VALUES('last_sync', '9999999999');
 """
 
+UNSTEMMED_FTS_SQL = OLD_FTS_SQL.replace("body, key UNINDEXED", "body, stem, key UNINDEXED").replace(
+    "INSERT INTO meta(k, v) VALUES('last_sync', '9999999999');",
+    "INSERT INTO meta(k, v) VALUES('last_sync', '9999999999');\nINSERT INTO meta(k, v) VALUES('languages', 'sv,en');",
+)
+
 
 class CountingBackend:
     def __init__(self, inner):
@@ -128,5 +133,55 @@ def test_an_index_without_the_stem_column_is_rebuilt_and_searchable_by_stem(vaul
         found = search(index, vault.schema, "orchard-fresh")
         assert [row.note.key for row in found.rows][0] == "Projects/orchard-fresh.md"
         assert index.db.execute("SELECT key FROM notes_fts WHERE notes_fts MATCH 'stem:\"orchard fresh\"'").fetchone()
+    finally:
+        index.close()
+
+
+def fts_columns(index: Index) -> set[str]:
+    return {row["name"] for row in index.db.execute("PRAGMA table_info(notes_fts)")}
+
+
+def test_an_index_without_the_stemmed_column_is_rebuilt_and_finds_inflections(vault: Vault, tmp_path: Path):
+    path = tmp_path / "old" / "index.sqlite"
+    path.parent.mkdir()
+    old = sqlite3.connect(path)
+    old.executescript(UNSTEMMED_FTS_SQL)
+    old.close()
+    index = Index(path, vault.index.backend, vault.schema.languages)
+    try:
+        assert "stemmed" in fts_columns(index)
+        assert index.all_notes() == []
+        index.sync()
+        assert "Areas/orchard.md" in [row.note.key for row in search(index, vault.schema, "lundkoden").rows]
+    finally:
+        index.close()
+
+
+def test_the_index_records_the_languages_it_was_stemmed_in(vault: Vault):
+    assert vault.index.meta("languages") == "sv,en"
+    assert vault.index.algorithms == ("swedish", "english")
+
+
+def test_changed_languages_rebuild_the_index(vault: Vault):
+    path = vault.index.path
+    vault.close()
+    index = Index(path, vault.backend, ("sv",))
+    try:
+        assert index.meta("languages") == "sv"
+        assert index.all_notes() == []
+        index.sync()
+        stemmed = index.db.execute("SELECT stemmed FROM notes_fts WHERE key = 'Areas/orchard.md'").fetchone()[0]
+        assert "\n" not in stemmed
+    finally:
+        index.close()
+
+
+def test_the_same_languages_keep_the_index(vault: Vault):
+    path = vault.index.path
+    count = len(vault.index.all_notes())
+    vault.close()
+    index = Index(path, vault.backend, ("sv", "en"))
+    try:
+        assert len(index.all_notes()) == count
     finally:
         index.close()

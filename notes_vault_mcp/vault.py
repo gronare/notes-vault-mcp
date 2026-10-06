@@ -34,7 +34,7 @@ class Vault:
         if self._index is None:
             if self.index_path is None:
                 raise RuntimeError("the vault has no index path")
-            self._index = Index(self.index_path, self.backend)
+            self._index = Index(self.index_path, self.backend, self.schema.languages)
         return self._index
 
     @property

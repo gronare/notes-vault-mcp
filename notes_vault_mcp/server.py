@@ -26,6 +26,9 @@ SEARCH_DESCRIPTION = (
     "A query that is exactly a note's stem, or its [[stem]] wikilink, puts that note first wherever it lives. "
     "Every term is required; when no note has them all, it returns the notes matching the most terms and "
     "says so in the header. "
+    "Inflected forms match through stemming in the vault's languages. "
+    "Search in the vault's language first; when nothing matches, translate the terms into the vault's other "
+    "languages and search again, and the reply names them. "
     "Excludes the archive and superseded notes unless you ask for them, and reports how many it hid."
 )
 

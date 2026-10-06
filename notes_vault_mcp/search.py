@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from notes_vault_mcp.index import Index, Note
 from notes_vault_mcp.schema import Schema
+from notes_vault_mcp.stemming import algorithms_of, stemmed
 
 SHA_TOKEN_RE = re.compile(r"^(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}$")
 PREFIX_MIN_LENGTH = 4
@@ -32,6 +33,7 @@ class SearchResult:
     hidden_superseded: int = 0
     term_count: int = 0
     best_terms: int = 0
+    languages: tuple[str, ...] = ()
 
     @property
     def partial(self) -> bool:
@@ -55,14 +57,25 @@ def _quote(text: str) -> str:
     return '"' + text.replace('"', '""') + '"'
 
 
+def _prefixed(word: str, is_phrase: bool) -> bool:
+    return not is_phrase and len(word) >= PREFIX_MIN_LENGTH
+
+
+def _stemmed_alternatives(words: list[str], is_phrase: bool, schema: Schema) -> list[str]:
+    algorithms = algorithms_of(schema.languages)
+    covered = {word.casefold() for word in words if _prefixed(word, is_phrase)}
+    renderings = dict.fromkeys(rendering for word in words for rendering in stemmed(word, algorithms))
+    return [f"stemmed : {_quote(rendering)}" for rendering in renderings if rendering not in covered]
+
+
 def _alternatives(term: str, is_phrase: bool, schema: Schema) -> list[str]:
     words = [term, *schema.synonyms_of(term)]
     alternatives: list[str] = []
     for word in words:
         alternatives.append(_quote(word))
-        if not is_phrase and len(word) >= PREFIX_MIN_LENGTH:
+        if _prefixed(word, is_phrase):
             alternatives.append(f"{_quote(word)} *")
-    return alternatives
+    return alternatives + _stemmed_alternatives(words, is_phrase, schema)
 
 
 def term_groups(query: str, schema: Schema) -> list[str]:
@@ -258,7 +271,7 @@ def search(
 
     now = time.time()
     unsearched = set(schema.unsearched_folders)
-    result = SearchResult()
+    result = SearchResult(languages=schema.languages)
     visible: list[Row] = []
     for row in candidates:
         note = row.note
@@ -299,9 +312,34 @@ def render_header(result: SearchResult) -> str:
     return f"{len(result.rows)} of {result.total} {hidden}"
 
 
+def translate_hint(languages: tuple[str, ...]) -> str:
+    if not languages:
+        return ""
+    primary, others = languages[0], ", ".join(languages[1:])
+    if not others:
+        return f"The vault is written in {primary}: search again with other words or the terms in {primary}."
+    return f"The vault is written in {primary}, also {others}: search again with the terms translated into {others}."
+
+
+def partial_hint(languages: tuple[str, ...]) -> str:
+    if len(languages) < 2:
+        return ""
+    return f"The terms translated into {', '.join(languages[1:])} may match them all."
+
+
+def _hidden(result: SearchResult) -> int:
+    return result.hidden_archive + result.hidden_superseded
+
+
 def render(result: SearchResult) -> str:
     now = time.time()
-    header = render_header(result)
+    lines = [render_header(result)]
     if not result.rows:
-        return header + "\nNo notes matched."
-    return "\n".join([header, *[render_row(row, now) for row in result.rows]])
+        lines.append("No notes matched.")
+        if not _hidden(result):
+            lines.append(translate_hint(result.languages))
+    else:
+        lines.extend(render_row(row, now) for row in result.rows)
+        if result.partial:
+            lines.append(partial_hint(result.languages))
+    return "\n".join(line for line in lines if line)

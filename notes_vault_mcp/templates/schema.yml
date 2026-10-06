@@ -1,5 +1,6 @@
 version: 1
 language: en
+other_languages: []
 folders:
   Areas:     { kind: system,    weight: 3.0, description: "One living note per system or subsystem. Current state only. Hub of the graph." }
   Resources: { kind: reference, weight: 2.0, description: "Gotchas, how-tos and decisions with rationale. Written once, valid until superseded_by." }
@@ -39,3 +40,4 @@ search:
   tags_weight: 3.0
   body_weight: 1.0
   stem_weight: 20.0
+  stemmed_weight: 0.5

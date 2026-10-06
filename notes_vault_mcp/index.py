@@ -11,6 +11,7 @@ from typing import Any
 
 from notes_vault_mcp.backends import Entry, VaultBackend
 from notes_vault_mcp.frontmatter import FrontmatterError, folder_of, parse, tags_of
+from notes_vault_mcp.stemming import algorithms_of, stemmed
 
 SYNC_THROTTLE_SECONDS = 20
 FETCH_WORKERS = 16
@@ -22,7 +23,7 @@ WIKILINK_RE = re.compile(r"\[\[([^\]\n]+)\]\]")
 
 FTS_SQL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-  title, summary, tags, body, stem, key UNINDEXED,
+  title, summary, tags, body, stem, stemmed, key UNINDEXED,
   tokenize="unicode61 remove_diacritics 2"
 );
 """
@@ -49,6 +50,7 @@ NOTE_COLUMNS = (
     "tags, paths, date, updated, superseded_by, valid, error, size, priority, source"
 )
 ADDED_COLUMNS = ("priority", "source")
+FTS_COLUMNS = {"stem", "stemmed"}
 
 
 @dataclass
@@ -174,9 +176,11 @@ def _casefold(text: str | None) -> str | None:
 
 
 class Index:
-    def __init__(self, path: Path, backend: VaultBackend) -> None:
+    def __init__(self, path: Path, backend: VaultBackend, languages: tuple[str, ...] = ()) -> None:
         self.path = Path(path)
         self.backend = backend
+        self.languages = tuple(languages)
+        self.algorithms = algorithms_of(self.languages)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=BUSY_TIMEOUT_MS / 1000)
         self.db.row_factory = sqlite3.Row
@@ -203,10 +207,13 @@ class Index:
             if column not in present:
                 self.db.execute(f"ALTER TABLE notes ADD COLUMN {column} TEXT")
                 self._forget_notes()
-        if "stem" not in self._columns("notes_fts"):
+        if not FTS_COLUMNS.issubset(self._columns("notes_fts")):
             self.db.execute("DROP TABLE notes_fts")
             self.db.executescript(FTS_SQL)
             self._forget_notes()
+        if self.meta("languages") != ",".join(self.languages):
+            self._forget_notes()
+            self.set_meta("languages", ",".join(self.languages))
         self.db.commit()
 
     def _columns(self, table: str) -> set[str]:
@@ -268,13 +275,17 @@ class Index:
             ),
         )
         self.db.execute(
-            "INSERT INTO notes_fts(title, summary, tags, body, stem, key) VALUES(?, ?, ?, ?, ?, ?)",
-            (note.title, note.summary, " ".join(note.tags), body, note.stem, note.key),
+            "INSERT INTO notes_fts(title, summary, tags, body, stem, stemmed, key) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            (note.title, note.summary, " ".join(note.tags), body, note.stem, self._stemmed(note, body), note.key),
         )
         self.db.executemany("INSERT INTO shas(sha, key) VALUES(?, ?)", [(sha, key) for sha in shas_in(text)])
         self.db.executemany("INSERT INTO links(src, target) VALUES(?, ?)", [(key, t) for t in link_targets(text)])
         self.db.commit()
         return note
+
+    def _stemmed(self, note: Note, body: str) -> str:
+        texts = (note.title, note.summary, " ".join(note.tags), body, note.stem)
+        return "\n".join(stemmed("\n".join(texts), self.algorithms))
 
     def remove(self, key: str) -> None:
         self.db.execute("DELETE FROM notes WHERE key = ?", (key,))

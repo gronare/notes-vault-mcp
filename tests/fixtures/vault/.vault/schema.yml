@@ -1,3 +1,5 @@
+language: sv
+other_languages: [en]
 tags:
   vocabulary: [orchard, frame, frame-addons, workshop, core, grove, cluster, booking, ui, ci, deploy, backup, domain, dns, log]
 synonyms:

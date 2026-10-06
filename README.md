@@ -23,8 +23,9 @@ read and write files:
   is about to touch — plus the commits made since each note was last updated — and `stop` refuses to
   end a session that left commits unlogged or notes stale.
 
-Swedish or English notes both work: the index folds diacritics, and the schema carries a synonym list
-so `bokning` finds `booking`.
+Swedish or English notes both work: the index folds diacritics, stems every word in the vault's
+languages so `äppelpressar` finds `äppelpressen` and `pressing` finds `presses`, and the schema carries a
+synonym list so `bokning` finds `booking`.
 
 ## Install
 
@@ -159,6 +160,13 @@ resolve `[[myapp]]`. Every place that builds the log path reads this setting —
 log tail in `context`, the stop hook's unlogged-commit check, `changelog` and `lint` — so changing it
 moves all of them at once. Rename the existing files to match when you change it.
 
+`language` is the vault's primary language and `other_languages` the rest, as ISO codes
+(`language: sv`, `other_languages: [en]`); search stems in every one Snowball supports, and changing
+them rebuilds the index. When nothing matches, the reply tells the client which languages the vault
+is written in so it can translate the terms and search again; a partial result says the same in one
+line. A stemmed-only match weighs `stemmed_weight` (0.5 by default, below the body's 1.0), so the exact
+form ranks first.
+
 Also configurable: the tag vocabulary and whether it is enforced, the synonym groups search expands,
 `stale_after_days`, and the search weights.
 
@@ -168,7 +176,7 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 
 | Tool | Cost | What it does |
 | --- | --- | --- |
-| `search` | cheap | Full-text over the index. File stem, title, summary, tags and body, with synonyms, prefixes, quoted phrases and folded diacritics. A query that is exactly a note's stem (or `[[stem]]`) puts that note first, even from the archive. Every term is required; when no note has them all, it returns the notes matching the most terms and the header says the result is partial. A bare commit sha finds the notes that mention it. Hides archive and superseded notes and says how many. |
+| `search` | cheap | Full-text over the index. File stem, title, summary, tags and body, with synonyms, prefixes, stemming, quoted phrases and folded diacritics. A query that is exactly a note's stem (or `[[stem]]`) puts that note first, even from the archive. Every term is required; when no note has them all, it returns the notes matching the most terms and the header says the result is partial. A bare commit sha finds the notes that mention it. Hides archive and superseded notes and says how many. |
 | `context` | cheap | The session-start call: the system notes covering a path, the open tasks, a triage list of open notes older than `stale_after_days` with the three ways to settle each, the backlog, the reference notes and the tail of the repo log, in one answer. |
 | `list_files` | cheap | Paths only. |
 | `read_file` | moderate | One note, prefixed with `etag: <version>`. A superseded note carries a warning callout. |

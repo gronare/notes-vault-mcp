@@ -147,6 +147,18 @@ class Schema:
         return found
 
     @property
+    def language(self) -> str:
+        return str(self.data.get("language") or "en")
+
+    @property
+    def other_languages(self) -> list[str]:
+        return [str(code) for code in (self.data.get("other_languages") or [])]
+
+    @property
+    def languages(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys([self.language, *self.other_languages]))
+
+    @property
     def stale_after_days(self) -> int:
         return int(self.data.get("stale_after_days", 30))
 
@@ -162,7 +174,7 @@ class Schema:
         return float(self._search().get("recency_half_life_days", 90))
 
     @property
-    def bm25_weights(self) -> tuple[float, float, float, float, float]:
+    def bm25_weights(self) -> tuple[float, float, float, float, float, float]:
         search = self._search()
         return (
             float(search.get("title_weight", 10.0)),
@@ -170,6 +182,7 @@ class Schema:
             float(search.get("tags_weight", 3.0)),
             float(search.get("body_weight", 1.0)),
             float(search.get("stem_weight", 20.0)),
+            float(search.get("stemmed_weight", 0.5)),
         )
 
 
@@ -226,6 +239,16 @@ def _kind_lines(schema: Schema) -> str:
     return "".join(f"\n  - {kind}: {rules[kind]}" if kind in rules else f"\n  - {kind}" for kind in schema.kind_values)
 
 
+def _language_line(schema: Schema) -> str:
+    others = ", ".join(schema.languages[1:])
+    if not others:
+        return f"Search in the vault's language, {schema.language}; inflected forms match through stemming."
+    return (
+        f"Search in the vault's language, {schema.language}, first; inflected forms match through stemming. "
+        f"When nothing matches, translate the terms into the vault's other languages ({others}) and search again."
+    )
+
+
 def instructions(schema: Schema) -> str:
     required = ", ".join(schema.required_fields)
     optional = ", ".join(schema.optional_fields)
@@ -238,6 +261,7 @@ def instructions(schema: Schema) -> str:
     vocabulary = f"Tags come from this vocabulary: {tags}." if tags else "Tags are free-form."
     strictness = " Tags outside it are rejected." if schema.tags_strict else " It is a guide, not a gate."
     folders = "\n".join(_folder_lines(schema))
+    language = _language_line(schema)
     return f"""\
 The vault is the single source of truth for plans, decisions, progress and reference material.
 This server indexes it, so search is cheap: run it before reading anything, and before writing code.
@@ -272,4 +296,5 @@ Workflow:
 
 `search` excludes the archive and superseded notes unless you ask for them, and says how many it hid.
 A wikilink [[stem]] is a search on the stem: that note comes first, even from the archive.
+{language}
 """
