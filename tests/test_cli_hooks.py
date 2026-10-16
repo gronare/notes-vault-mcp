@@ -163,6 +163,19 @@ def test_stop_counts_cherry_picks_and_merge_commits_but_not_the_merged_branch(tm
     assert theirs not in shas
 
 
+def test_stop_counts_commits_rebased_by_pull_but_not_the_upstream(tmp_path):
+    repo = make_repo(tmp_path / "repos", "frame")
+    teammate = tmp_path / "teammate"
+    subprocess.run(["git", "clone", "-q", str(repo), str(teammate)], check=True)
+    theirs = commit_in(teammate, "Teammate's commit")
+    commit_in(repo, "My commit")
+    identity = ["-c", "user.email=t@example.com", "-c", "user.name=T"]
+    subprocess.run(["git", *identity, "pull", "-q", "--rebase", str(teammate), "HEAD"], cwd=repo, check=True)
+    shas = [sha for sha, _ in hooks._recent_commits(repo)]
+    assert head_sha(repo) in shas
+    assert theirs not in shas
+
+
 def test_stop_falls_back_to_recent_commits_without_a_reflog(tmp_path):
     repo = make_repo(tmp_path / "repos", "frame")
     (repo / ".git" / "logs" / "HEAD").unlink()

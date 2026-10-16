@@ -77,8 +77,9 @@ def session_start(raw: str) -> str:
 RECENT = "24 hours ago"
 # Reflog actions that create a commit; fast-forwards, resets and checkouts only move HEAD.
 OWN_COMMIT_ACTION = re.compile(
-    r"^(commit|cherry-pick|revert|rebase( -i)? \((pick|continue|reword|edit|squash|fixup)\)"
-    r"|(merge|pull)\b.*: Merge made by)"
+    r"^(commit|cherry-pick|revert|am)\b"
+    r"|^(rebase|pull)\b.*? \((pick|continue|reword|edit|squash|fixup)\): "
+    r"|^(merge|pull)\b.*: Merge made by"
 )
 
 
