@@ -280,6 +280,7 @@ def test_repo_name_is_the_main_checkout_in_a_worktree(tmp_path):
     worktree = add_worktree(repo, tmp_path / "repos" / "wt1.orchard", "fix-booking")
     assert hooks.repo_name(worktree) == "orchard"
     assert git.main_checkout(worktree) == repo.resolve()
+    assert git.current_branch(worktree) == "fix-booking"
 
 
 def test_repo_name_of_a_bare_repo_drops_the_git_suffix(tmp_path):
@@ -328,7 +329,9 @@ def test_session_start_in_a_worktree_lists_commits_on_note_paths_in_the_main_che
     assert "First commit" in out
 
 
-def test_stop_in_a_worktree_names_the_main_repo(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
+def test_stop_in_a_worktree_names_the_main_repo_and_the_branch(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+):
     repo = make_repo(tmp_path / "repos", "frame")
     notes.log_append(vault, "frame", "Första bygget", commits=(head_sha(repo),))
     worktree = add_worktree(repo, tmp_path / "repos" / "wt1.frame", "fix-app")
@@ -336,7 +339,7 @@ def test_stop_in_a_worktree_names_the_main_repo(vault: Vault, monkeypatch: pytes
     feed(monkeypatch, {"cwd": str(worktree)})
     assert main(["hook", "stop"]) == 0
     reason = json.loads(capsys.readouterr().out)["reason"]
-    assert f"log_append(repo='frame', line='<what landed>', commits=['{mine}'])" in reason
+    assert f"log_append(repo='frame', branch='fix-app', line='<what landed>', commits=['{mine}'])" in reason
     assert "wt1.frame" not in reason
 
 
@@ -346,7 +349,7 @@ def test_stop_in_a_worktree_is_silent_once_logged_under_the_main_repo(
     repo = make_repo(tmp_path / "repos", "frame")
     worktree = add_worktree(repo, tmp_path / "repos" / "wt1.frame", "fix-app")
     mine = commit_in(worktree, "Fix the app")
-    notes.log_append(vault, "frame", "Appen lagad", commits=(mine,))
+    notes.log_append(vault, "frame", "Appen lagad", commits=(mine,), branch="fix-app")
     feed(monkeypatch, {"cwd": str(worktree)})
     assert main(["hook", "stop"]) == 0
     assert capsys.readouterr().out == ""

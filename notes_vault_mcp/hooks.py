@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from notes_vault_mcp import changelog
-from notes_vault_mcp.git import git, in_main_checkout, main_checkout, repo_name, repo_root
+from notes_vault_mcp.git import current_branch, git, in_main_checkout, main_checkout, repo_name, repo_root
 from notes_vault_mcp.notes import context, vault_paths_in
 from notes_vault_mcp.search import age_days, humanize_age
 from notes_vault_mcp.vault import Vault, open_vault
@@ -162,12 +162,13 @@ def touched_notes(transcript_path: str | None) -> set[str]:
     return touched
 
 
-def _reason(commits: list[tuple[str, str]], stale: list[str], repo: str) -> str:
+def _reason(commits: list[tuple[str, str]], stale: list[str], repo: str, branch: str | None = None) -> str:
     parts = []
     if commits:
         listed = ", ".join(f"{sha} {subject}" for sha, subject in commits)
         shas = [sha for sha, _ in commits]
-        parts.append(f"log_append(repo='{repo}', line='<what landed>', commits={shas}) — {listed}")
+        on_branch = f", branch='{branch}'" if branch else ""
+        parts.append(f"log_append(repo='{repo}'{on_branch}, line='<what landed>', commits={shas}) — {listed}")
     if stale:
         parts.append("close these notes, or say in them what is still open: " + ", ".join(stale))
     return "The vault is behind this session. " + "; ".join(parts)
@@ -206,4 +207,4 @@ def stop(raw: str) -> str | None:
     blocking = [label for key, label in stale if key in touched]
     if not commits and not blocking:
         return None
-    return json.dumps({"decision": "block", "reason": _reason(commits, blocking, repo)})
+    return json.dumps({"decision": "block", "reason": _reason(commits, blocking, repo, current_branch(root))})

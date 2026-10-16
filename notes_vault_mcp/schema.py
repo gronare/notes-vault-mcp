@@ -9,6 +9,8 @@ import yaml
 
 from notes_vault_mcp.backends import SCHEMA_KEY, VaultBackend
 
+DEFAULT_LOG_ENTRY_FORMAT = "- [{date}] {line} | branch: {branch} | commits: {commits} | {area}"
+
 
 @dataclass(frozen=True)
 class Folder:
@@ -73,7 +75,7 @@ class Schema:
 
     @property
     def log_entry_format(self) -> str:
-        return str((self.data.get("log") or {}).get("entry_format", "- [{date}] {line} | commits: {commits} | {area}"))
+        return str((self.data.get("log") or {}).get("entry_format", DEFAULT_LOG_ENTRY_FORMAT))
 
     @property
     def task_folders(self) -> list[str]:

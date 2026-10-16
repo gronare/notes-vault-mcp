@@ -54,5 +54,9 @@ def in_main_checkout(cwd: str | Path) -> Path:
     return main / here.relative_to(root)
 
 
+def current_branch(cwd: str | Path) -> str | None:
+    return git(["branch", "--show-current"], cwd) or None
+
+
 def is_checkout(path: Path) -> bool:
     return (path / ".git").exists()

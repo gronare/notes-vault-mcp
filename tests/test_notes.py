@@ -148,7 +148,13 @@ def test_log_append_adds_a_line_to_the_repo_log(vault: Vault):
     notes.log_append(vault, "orchard", "Bokningen klar", commits=("abc1234", "def5678"))
     _, body = body_of(vault, "Log/orchard-log.md")
     last = body.strip().splitlines()[-1]
-    assert last == f"- [{date.today().isoformat()}] Bokningen klar | commits: abc1234 def5678 | [[orchard]]"
+    assert last == f"- [{date.today().isoformat()}] Bokningen klar | branch: - | commits: abc1234 def5678 | [[orchard]]"
+
+
+def test_log_append_records_the_branch(vault: Vault):
+    notes.log_append(vault, "orchard", "Bokningen klar", commits=("abc1234",), branch="fix-booking")
+    _, body = body_of(vault, "Log/orchard-log.md")
+    assert "| branch: fix-booking | commits: abc1234 |" in body.strip().splitlines()[-1]
 
 
 def test_log_append_creates_a_missing_log(vault: Vault):

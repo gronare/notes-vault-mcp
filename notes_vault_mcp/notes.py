@@ -196,7 +196,14 @@ def _new_log(repo: str, area: str | None) -> tuple[dict, str]:
     return frontmatter, ""
 
 
-def log_append(vault: Vault, repo: str, line: str, commits: tuple[str, ...] = (), area: str | None = None) -> str:
+def log_append(
+    vault: Vault,
+    repo: str,
+    line: str,
+    commits: tuple[str, ...] = (),
+    area: str | None = None,
+    branch: str | None = None,
+) -> str:
     key = vault.schema.log_key(repo)
     try:
         existing, _ = _read(vault, key)
@@ -210,6 +217,7 @@ def log_append(vault: Vault, repo: str, line: str, commits: tuple[str, ...] = ()
         date=today(),
         line=line,
         commits=" ".join(commits) if commits else "-",
+        branch=branch or "-",
         area=frontmatter.get("area") or "-",
     )
     body = f"{body.rstrip()}\n{entry}\n" if body.strip() else f"{entry}\n"

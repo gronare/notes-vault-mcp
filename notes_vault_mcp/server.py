@@ -186,13 +186,17 @@ def build_server(
         name="log_append",
         description=(
             "WRITE — appends one dated line to the repo log, with the commits it produced. Run once at "
-            "the end of a session per repo. Creates the log note when it is missing. area is the stem of "
+            "the end of a session per repo. Creates the log note when it is missing. repo is the main checkout's "
+            "name, also from a worktree; branch is the branch the commits were made on. area is the stem of "
             "the system note (or [[stem]]); it defaults to the repo name."
         ),
     )
-    def log_append(repo: str, line: str, commits: list[str] | None = None, area: str | None = None) -> str:
+    def log_append(
+        repo: str, line: str, commits: list[str] | None = None, area: str | None = None, branch: str | None = None
+    ) -> str:
         return run(
-            lambda vault: notes.log_append(vault, repo, line, commits=tuple(commits or ()), area=area), write=True
+            lambda vault: notes.log_append(vault, repo, line, commits=tuple(commits or ()), area=area, branch=branch),
+            write=True,
         )
 
     @server.tool(
