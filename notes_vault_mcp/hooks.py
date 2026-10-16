@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import time
 from datetime import date
 from pathlib import Path
@@ -73,13 +74,35 @@ def session_start(raw: str) -> str:
         vault.close()
 
 
+RECENT = "24 hours ago"
+# Reflog actions that create a commit; fast-forwards, resets and checkouts only move HEAD.
+OWN_COMMIT_ACTION = re.compile(
+    r"^(commit|cherry-pick|revert|rebase( -i)? \((pick|continue|reword|edit|squash|fixup)\)"
+    r"|(merge|pull)\b.*: Merge made by)"
+)
+
+
+def _own_commit_shas(root: Path) -> set[str] | None:
+    output = git(["reflog", "show", "--format=%H|%gs", "HEAD"], root)
+    if not output:
+        return None
+    shas = set()
+    for line in output.splitlines():
+        sha, _, action = line.partition("|")
+        if OWN_COMMIT_ACTION.match(action):
+            shas.add(sha)
+    return shas
+
+
 def _recent_commits(root: Path) -> list[tuple[str, str]]:
-    output = git(["log", "--since=24 hours ago", "--format=%h|%s"], root)
+    output = git(["log", f"--since={RECENT}", "--format=%H|%s"], root)
+    own = _own_commit_shas(root)
     commits = []
     for line in output.splitlines():
         sha, _, subject = line.partition("|")
-        if sha.strip():
-            commits.append((sha.strip()[:SHA_PREFIX_LENGTH], subject.strip()))
+        sha = sha.strip()
+        if sha and (own is None or sha in own):
+            commits.append((sha[:SHA_PREFIX_LENGTH], subject.strip()))
     return commits
 
 

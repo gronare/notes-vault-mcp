@@ -104,6 +104,71 @@ def test_stop_blocks_when_a_commit_is_not_logged(vault: Vault, monkeypatch: pyte
     assert head_sha(repo) in payload["reason"]
 
 
+def commit_in(repo: Path, message: str) -> str:
+    identity = ["-c", "user.email=t@example.com", "-c", "user.name=T"]
+    subprocess.run(["git", *identity, "commit", "-q", "--allow-empty", "-m", message], cwd=repo, check=True)
+    return head_sha(repo)
+
+
+def fast_forward_from_a_teammate(repo: Path, tmp_path: Path) -> str:
+    teammate = tmp_path / "teammate"
+    subprocess.run(["git", "clone", "-q", str(repo), str(teammate)], check=True)
+    sha = commit_in(teammate, "Teammate's commit")
+    subprocess.run(["git", "pull", "-q", "--ff-only", str(teammate), "HEAD"], cwd=repo, check=True)
+    return sha
+
+
+def test_stop_ignores_commits_that_arrived_by_fast_forward(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+):
+    repo = make_repo(tmp_path / "repos", "frame")
+    notes.log_append(vault, "frame", "Första bygget", commits=(head_sha(repo),))
+    fast_forward_from_a_teammate(repo, tmp_path)
+    feed(monkeypatch, {"cwd": str(repo)})
+    assert main(["hook", "stop"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_stop_names_only_the_sessions_own_commit_after_a_fast_forward(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+):
+    repo = make_repo(tmp_path / "repos", "frame")
+    notes.log_append(vault, "frame", "Första bygget", commits=(head_sha(repo),))
+    theirs = fast_forward_from_a_teammate(repo, tmp_path)
+    mine = commit_in(repo, "My commit")
+    feed(monkeypatch, {"cwd": str(repo)})
+    assert main(["hook", "stop"]) == 0
+    reason = json.loads(capsys.readouterr().out)["reason"]
+    assert mine in reason
+    assert theirs not in reason
+
+
+def test_stop_counts_cherry_picks_and_merge_commits_but_not_the_merged_branch(tmp_path):
+    repo = make_repo(tmp_path / "repos", "frame")
+    teammate = tmp_path / "teammate"
+    subprocess.run(["git", "clone", "-q", str(repo), str(teammate)], check=True)
+    to_pick = commit_in(teammate, "To pick")
+    theirs = commit_in(teammate, "Teammate's commit")
+    mine = commit_in(repo, "My commit")
+    identity = ["-c", "user.email=t@example.com", "-c", "user.name=T"]
+    subprocess.run(["git", "fetch", "-q", str(teammate), "HEAD"], cwd=repo, check=True)
+    cherry_pick = ["git", *identity, "cherry-pick", "--allow-empty", to_pick]
+    subprocess.run(cherry_pick, cwd=repo, check=True, capture_output=True)
+    picked = head_sha(repo)
+    subprocess.run(["git", *identity, "merge", "-q", "FETCH_HEAD", "-m", "Merge theirs"], cwd=repo, check=True)
+    merge = head_sha(repo)
+    shas = [sha for sha, _ in hooks._recent_commits(repo)]
+    assert {mine, picked, merge} <= set(shas)
+    assert to_pick not in shas
+    assert theirs not in shas
+
+
+def test_stop_falls_back_to_recent_commits_without_a_reflog(tmp_path):
+    repo = make_repo(tmp_path / "repos", "frame")
+    (repo / ".git" / "logs" / "HEAD").unlink()
+    assert [sha for sha, _ in hooks._recent_commits(repo)] == [head_sha(repo)]
+
+
 def test_stop_is_silent_once_the_commit_is_logged(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
     repo = make_repo(tmp_path / "repos", "frame")
     notes.log_append(vault, "frame", "Första bygget", commits=(head_sha(repo),))
