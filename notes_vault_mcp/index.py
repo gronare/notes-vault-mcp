@@ -242,6 +242,10 @@ class Index:
         )
         self.db.commit()
 
+    def forget_repo(self, repo: str) -> None:
+        self.db.execute("DELETE FROM repos WHERE repo = ?", (repo,))
+        self.db.commit()
+
     def known_repos(self) -> list[tuple[str, str]]:
         rows = self.db.execute("SELECT repo, root FROM repos ORDER BY repo").fetchall()
         return [(row["repo"], row["root"]) for row in rows]

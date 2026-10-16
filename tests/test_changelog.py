@@ -89,6 +89,18 @@ def test_write_all_covers_the_remembered_repos_and_skips_a_vanished_checkout(vau
     assert not (vault_dir / "Log/gone-2026-08.md").exists()
 
 
+def test_write_all_forgets_worktree_names_and_missing_roots(vault: Vault, vault_dir: Path, tmp_path):
+    repo = make_repo(tmp_path / "repos", "orchard")
+    worktree = tmp_path / "repos" / "wt1.orchard"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "fix-booking", str(worktree)], cwd=repo, check=True)
+    vault.index.remember_repo("orchard", str(repo))
+    vault.index.remember_repo("wt1.orchard", str(worktree))
+    vault.index.remember_repo("gone", str(tmp_path / "repos" / "gone"))
+    assert changelog.write_all(vault, periods=["2026-08"]) == ["Log/orchard-2026-08.md"]
+    assert not (vault_dir / "Log/wt1.orchard-2026-08.md").exists()
+    assert vault.index.known_repos() == [("orchard", str(repo))]
+
+
 def test_session_start_remembers_the_repo(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
     repo = make_repo(tmp_path / "repos", "orchard")
     feed(monkeypatch, {"cwd": str(repo)})

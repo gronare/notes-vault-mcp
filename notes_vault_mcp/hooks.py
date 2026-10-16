@@ -9,7 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from notes_vault_mcp import changelog
-from notes_vault_mcp.git import git, repo_name, repo_root
+from notes_vault_mcp.git import git, in_main_checkout, main_checkout, repo_name, repo_root
 from notes_vault_mcp.notes import context, vault_paths_in
 from notes_vault_mcp.search import age_days, humanize_age
 from notes_vault_mcp.vault import Vault, open_vault
@@ -49,13 +49,15 @@ def _commits_since(root: Path, since: str, paths: list[str]) -> str:
 
 def session_start_text(vault: Vault, cwd: str) -> str:
     repo = repo_name(cwd)
-    bundle = context(vault, path=cwd, repo=repo)
+    bundle = context(vault, path=str(in_main_checkout(cwd)), repo=repo)
     blocks = [bundle.render()]
     root = repo_root(cwd)
-    if root is not None:
-        vault.index.remember_repo(repo, str(root))
+    main = main_checkout(cwd)
+    if root is not None and main is not None:
+        vault.index.remember_repo(repo, str(main))
         for note, _ in bundle.system:
-            paths = vault_paths_in(note, root)
+            # Note paths name the main checkout; git log takes them relative to the worktree it runs in.
+            paths = [os.path.relpath(path, main) for path in vault_paths_in(note, main)]
             commits = _commits_since(root, note.updated, paths)
             if commits:
                 blocks.append(f"## commits since the note — {note.key} (updated {note.updated})\n{commits}")
@@ -190,14 +192,14 @@ def stop(raw: str) -> str | None:
     root = repo_root(cwd)
     if root is None:
         return None
-    repo = root.name
+    repo = repo_name(cwd)
     vault = open_vault()
     try:
         vault.index.sync()
         with contextlib.suppress(Exception):
             refresh_month_pages(vault)
         commits = unlogged_commits(vault, root, repo)
-        stale = stale_open_notes(vault, repo, cwd)
+        stale = stale_open_notes(vault, repo, str(in_main_checkout(cwd)))
     finally:
         vault.close()
     touched = touched_notes(data.get("transcript_path"))

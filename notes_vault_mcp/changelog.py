@@ -6,7 +6,7 @@ from pathlib import Path
 
 from notes_vault_mcp.backends import NotFound
 from notes_vault_mcp.frontmatter import dump, parse
-from notes_vault_mcp.git import git, is_checkout
+from notes_vault_mcp.git import git, is_checkout, repo_name
 from notes_vault_mcp.index import Note, stem_of
 from notes_vault_mcp.notes import _reindex, changelog_notes, log_lines, today
 from notes_vault_mcp.vault import Vault
@@ -128,9 +128,20 @@ def write_page(vault: Vault, repo: str, period: str, repo_path: Path | None) -> 
     return True
 
 
+def live_repos(vault: Vault) -> list[tuple[str, str]]:
+    """Forgets repos whose root is gone, or that were remembered under a worktree directory's name."""
+    live = []
+    for repo, root in vault.index.known_repos():
+        if Path(root).exists() and repo_name(root) == repo:
+            live.append((repo, root))
+        else:
+            vault.index.forget_repo(repo)
+    return live
+
+
 def write_all(vault: Vault, periods: list[str] | None = None, repos: list[tuple[str, str]] | None = None) -> list[str]:
     written = []
-    for repo, root in repos if repos is not None else vault.index.known_repos():
+    for repo, root in repos if repos is not None else live_repos(vault):
         path = Path(root)
         if not is_checkout(path):
             continue

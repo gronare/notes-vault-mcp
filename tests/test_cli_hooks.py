@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from notes_vault_mcp import hooks, notes
+from notes_vault_mcp import git, hooks, notes
 from notes_vault_mcp.cli import main
 from notes_vault_mcp.config import env
 from notes_vault_mcp.vault import Vault
@@ -266,6 +266,88 @@ def test_stop_outside_a_git_repo_is_silent(vault: Vault, monkeypatch: pytest.Mon
     loose = tmp_path / "loose"
     loose.mkdir()
     feed(monkeypatch, {"cwd": str(loose)})
+    assert main(["hook", "stop"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def add_worktree(repo: Path, path: Path, branch: str) -> Path:
+    subprocess.run(["git", "worktree", "add", "-q", "-b", branch, str(path)], cwd=repo, check=True)
+    return path
+
+
+def test_repo_name_is_the_main_checkout_in_a_worktree(tmp_path):
+    repo = make_repo(tmp_path / "repos", "orchard")
+    worktree = add_worktree(repo, tmp_path / "repos" / "wt1.orchard", "fix-booking")
+    assert hooks.repo_name(worktree) == "orchard"
+    assert git.main_checkout(worktree) == repo.resolve()
+
+
+def test_repo_name_of_a_bare_repo_drops_the_git_suffix(tmp_path):
+    repo = make_repo(tmp_path / "repos", "orchard")
+    bare = tmp_path / "bare" / "orchard.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(bare)], check=True)
+    worktree = tmp_path / "bare" / "wt1.orchard"
+    subprocess.run(["git", "worktree", "add", "-q", str(worktree)], cwd=bare, check=True)
+    assert hooks.repo_name(worktree) == "orchard"
+
+
+def test_in_main_checkout_maps_a_worktree_subdirectory(tmp_path):
+    repo = make_repo(tmp_path / "repos", "orchard")
+    worktree = add_worktree(repo, tmp_path / "repos" / "wt1.orchard", "fix-booking")
+    (worktree / "app").mkdir()
+    assert git.in_main_checkout(worktree / "app") == repo.resolve() / "app"
+    assert git.in_main_checkout(repo) == repo.resolve()
+
+
+def test_session_start_in_a_worktree_loads_the_main_repo(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+):
+    repo = make_repo(tmp_path / "repos", "orchard")
+    worktree = add_worktree(repo, tmp_path / "repos" / "wt1.orchard", "fix-booking")
+    feed(monkeypatch, {"cwd": str(worktree)})
+    assert main(["hook", "session-start"]) == 0
+    assert "Areas/orchard.md" in capsys.readouterr().out
+    assert vault.index.known_repos() == [("orchard", str(repo.resolve()))]
+
+
+def test_session_start_in_a_worktree_lists_commits_on_note_paths_in_the_main_checkout(
+    vault: Vault, vault_dir: Path, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+):
+    repo = make_repo(tmp_path / "repos", "frame")
+    (vault_dir / "Areas" / "frame-app.md").write_text(
+        "---\ntitle: frame app\ndate: 2020-01-01\nupdated: 2020-01-01\n"
+        f"tags: [frame]\nstatus: active\nkind: system\npath: {repo}/app.py\n---\n\nAppen.\n",
+        encoding="utf-8",
+    )
+    vault.index.sync(force=True)
+    worktree = add_worktree(repo, tmp_path / "repos" / "wt1.frame", "fix-app")
+    feed(monkeypatch, {"cwd": str(worktree)})
+    assert main(["hook", "session-start"]) == 0
+    out = capsys.readouterr().out
+    assert "commits since the note — Areas/frame-app.md" in out
+    assert "First commit" in out
+
+
+def test_stop_in_a_worktree_names_the_main_repo(vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys):
+    repo = make_repo(tmp_path / "repos", "frame")
+    notes.log_append(vault, "frame", "Första bygget", commits=(head_sha(repo),))
+    worktree = add_worktree(repo, tmp_path / "repos" / "wt1.frame", "fix-app")
+    mine = commit_in(worktree, "Fix the app")
+    feed(monkeypatch, {"cwd": str(worktree)})
+    assert main(["hook", "stop"]) == 0
+    reason = json.loads(capsys.readouterr().out)["reason"]
+    assert f"log_append(repo='frame', line='<what landed>', commits=['{mine}'])" in reason
+    assert "wt1.frame" not in reason
+
+
+def test_stop_in_a_worktree_is_silent_once_logged_under_the_main_repo(
+    vault: Vault, monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+):
+    repo = make_repo(tmp_path / "repos", "frame")
+    worktree = add_worktree(repo, tmp_path / "repos" / "wt1.frame", "fix-app")
+    mine = commit_in(worktree, "Fix the app")
+    notes.log_append(vault, "frame", "Appen lagad", commits=(mine,))
+    feed(monkeypatch, {"cwd": str(worktree)})
     assert main(["hook", "stop"]) == 0
     assert capsys.readouterr().out == ""
 
