@@ -86,10 +86,6 @@ def test_local_backend_refuses_an_absolute_key_on_every_operation(tmp_path: Path
     assert not outside.exists() and not (tmp_path / "made").exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: LocalBackend keeps the root unresolved, so a symlinked root refuses every key",
-)
 def test_local_backend_works_when_the_root_is_reached_through_a_symlink(tmp_path: Path):
     real = tmp_path / "real"
     real.mkdir()
@@ -101,17 +97,12 @@ def test_local_backend_works_when_the_root_is_reached_through_a_symlink(tmp_path
 
 
 @pytest.mark.parametrize("key", ["", ".", "Areas"])
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: delete_file on a folder key (or the root) removes the whole tree in a local vault",
-)
 def test_delete_refuses_a_directory_key(vault, vault_dir: Path, key: str):
     with pytest.raises((VaultError, ValueError)):
         notes.delete(vault, key)
     assert (vault_dir / "Areas" / "orchard.md").is_file()
 
 
-@pytest.mark.xfail(strict=True, reason="bug: move_file moves a whole folder when given a directory key")
 def test_move_refuses_a_directory_source(vault, vault_dir: Path):
     with pytest.raises((VaultError, ValueError)):
         notes.move(vault, "Areas", "Archive/areas")
@@ -121,40 +112,24 @@ def test_move_refuses_a_directory_source(vault, vault_dir: Path):
 # --- keys outside the vault's note set ------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: write_file accepts any key, so a prompt-injected client can plant an Obsidian plugin",
-)
 def test_write_refuses_a_key_under_the_obsidian_config(vault, vault_dir: Path):
     with pytest.raises((VaultError, ValueError)):
         notes.write(vault, PLUGIN_CODE, "alert(1)")
     assert not (vault_dir / PLUGIN_CODE).exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: append_file accepts any key, so it can create or extend files outside the note set",
-)
 def test_append_refuses_a_key_under_the_obsidian_config(vault, vault_dir: Path):
     with pytest.raises((VaultError, ValueError)):
         notes.append(vault, PLUGIN_CODE, "alert(1)")
     assert not (vault_dir / PLUGIN_CODE).exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: move_file accepts any destination, so a note body can be moved into the Obsidian config",
-)
 def test_move_refuses_a_destination_under_the_obsidian_config(vault, vault_dir: Path):
     with pytest.raises((VaultError, ValueError)):
         notes.move(vault, "Areas/orchard.md", PLUGIN_CODE)
     assert not (vault_dir / PLUGIN_CODE).exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: read_file serves files the index hides, such as the Remotely Save config with its credentials",
-)
 def test_read_refuses_the_obsidian_config(vault, vault_dir: Path):
     target = vault_dir / OBSIDIAN_SECRET
     target.parent.mkdir(parents=True)
@@ -171,15 +146,45 @@ def test_list_files_never_shows_the_obsidian_config(vault, vault_dir: Path):
     assert _listing(vault, ".obsidian/") == "No files under '.obsidian/'"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a key with a parent segment is validated against the first folder named, not the one it lands in",
-)
 def test_a_key_with_a_parent_segment_is_validated_against_the_folder_it_lands_in(vault, vault_dir: Path):
     without_area = "---\ntitle: Sneaky\ndate: 2026-08-01\nupdated: 2026-08-01\ntags: [x]\nstatus: active\n---\n\nBody\n"
     with pytest.raises(notes.ValidationError):
         notes.write(vault, "Areas/../Projects/sneaky.md", without_area)
     assert not (vault_dir / "Projects" / "sneaky.md").exists()
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "/etc/passwd.md",
+        "C:/x.md",
+        "Areas\\x.md",
+        "Areas/x\x00.md",
+        "Areas//x.md",
+        "./Areas/x.md",
+        "Areas/.x.md",
+        ".trash/x.md",
+    ],
+)
+def test_note_key_refuses_every_shape_that_is_not_a_plain_note_path(key: str):
+    with pytest.raises(notes.InvalidKey):
+        notes.note_key(key)
+
+
+def test_note_key_reads_the_schema_and_bases_but_writes_only_notes():
+    assert notes.note_key(".vault/schema.yml", readable=True) == ".vault/schema.yml"
+    assert notes.note_key("Areas.base", readable=True) == "Areas.base"
+    for key in (".vault/schema.yml", "Areas.base", "Areas/x.txt"):
+        with pytest.raises(notes.InvalidKey):
+            notes.note_key(key)
+
+
+def test_lint_write_refuses_a_path_outside_the_note_set(vault, vault_dir: Path, capsys):
+    from notes_vault_mcp.cli import main
+
+    assert main(["lint", "--write", ".obsidian/workspace.json"]) == 2
+    assert capsys.readouterr().err.count("\n") == 1
+    assert not (vault_dir / ".obsidian" / "workspace.json").exists()
 
 
 def test_a_missing_note_error_names_the_key_and_not_the_vault_root(vault, vault_dir: Path):
@@ -343,3 +348,37 @@ async def test_dav_ignores_the_username_and_trusts_only_the_token(dav: tuple[Any
         await _call(app, "PUT", "/dav/Areas/mine.md", _basic(secret), b"mine")
         status, _ = await _call(app, "GET", "/dav/Areas/mine.md", headers)
     assert status == 404
+
+
+@pytest.mark.anyio
+async def test_dav_put_refuses_a_declared_body_over_the_cap(dav: tuple[Any, str], storage: Path):
+    app, secret = dav
+    async with app.router.lifespan_context(app):
+        status, _ = await _call(
+            app, "PUT", "/dav/Areas/huge.md", {**_basic(secret), "Content-Length": str(1 << 40)}, b"small"
+        )
+    assert status == 413
+    assert not (storage / "users" / "1042" / "Areas" / "huge.md").exists()
+
+
+@pytest.mark.anyio
+async def test_dav_put_refuses_a_streamed_body_over_the_cap(vaults: SubjectVaults, tmp_path: Path, storage: Path):
+    from notes_vault_mcp.dav import WebDav
+
+    tokens = PersonalTokens(tmp_path / "auth")
+    secret = tokens.issue("1042")
+    status, _ = await _call(WebDav(vaults, tokens, max_body=10), "PUT", "/dav/Areas/x.md", _basic(secret), b"x" * 11)
+    assert status == 413
+    assert not (storage / "users" / "1042" / "Areas" / "x.md").exists()
+
+
+def test_the_cache_and_auth_directories_are_private(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from notes_vault_mcp.auth import auth_dir
+    from notes_vault_mcp.config import cache_dir
+
+    existing = tmp_path / "cache"
+    existing.mkdir(mode=0o755)
+    monkeypatch.setenv("VAULT_CACHE_DIR", str(existing))
+    monkeypatch.delenv("VAULT_AUTH_DIR", raising=False)
+    assert cache_dir().stat().st_mode & 0o777 == 0o700
+    assert auth_dir().stat().st_mode & 0o777 == 0o700

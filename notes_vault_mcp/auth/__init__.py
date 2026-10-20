@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from notes_vault_mcp.config import ConfigError, cache_dir, env
+from notes_vault_mcp.config import ConfigError, cache_dir, env, private_dir
 
 AuthMode = Literal["bearer", "oidc", "builtin", "forwarded"]
 READ_SCOPE = "vault:read"
@@ -24,6 +24,10 @@ NO_PUBLIC_URL = (
     "(for example https://home-vault.example.com); there is no default and never a fallback."
 )
 NO_ISSUER = "notes-vault-mcp: --auth oidc needs VAULT_OIDC_ISSUER, the identity provider's issuer URL."
+NO_AUDIENCE = (
+    "notes-vault-mcp: --auth oidc needs VAULT_OIDC_AUDIENCE, the client id the provider puts in `aud`; "
+    "without it a token issued for any other application would be accepted."
+)
 NO_IDENTITY_KEY = (
     "notes-vault-mcp: --auth forwarded needs VAULT_IDENTITY_PUBLIC_KEY, the PEM public key (raw, or base64 on one "
     "line) the proxy signs its identity tokens with."
@@ -78,9 +82,7 @@ class AuthConfig:
 
 def auth_dir() -> Path:
     raw = env("VAULT_AUTH_DIR")
-    path = Path(raw).expanduser() if raw else cache_dir() / "auth"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return private_dir(Path(raw).expanduser() if raw else cache_dir() / "auth")
 
 
 def public_key_pem(raw: str) -> str:
@@ -126,11 +128,14 @@ def auth_config(mode: AuthMode) -> AuthConfig:
         issuer = (env("VAULT_OIDC_ISSUER") or "").rstrip("/")
         if not issuer:
             raise ConfigError(NO_ISSUER)
+        audience = (env("VAULT_OIDC_AUDIENCE") or "").strip()
+        if not audience:
+            raise ConfigError(NO_AUDIENCE)
         return AuthConfig(
             mode="oidc",
             public_url=public_url,
             issuer=issuer,
-            audience=env("VAULT_OIDC_AUDIENCE") or "",
+            audience=audience,
             read_group=env("VAULT_OIDC_READ_GROUP") or DEFAULT_READ_GROUP,
             write_group=env("VAULT_OIDC_WRITE_GROUP") or DEFAULT_WRITE_GROUP,
             idp_scopes=_words("VAULT_OIDC_SCOPES", DEFAULT_IDP_SCOPES),

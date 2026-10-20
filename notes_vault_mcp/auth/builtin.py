@@ -31,6 +31,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from notes_vault_mcp.auth import READ_SCOPE, WRITE_SCOPE, AuthConfig, auth_dir
+from notes_vault_mcp.config import private_dir
 
 CODE_TTL = 300
 ACCESS_TTL = 3600
@@ -39,6 +40,18 @@ REQUEST_TTL = 900
 MAX_FAILURES = 5
 FAILURE_WINDOW = 60.0
 LOCKOUT_SECONDS = 60.0
+PAGE_HEADERS = {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def page_response(body: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(body, status_code=status_code, headers=PAGE_HEADERS)
+
+
 SCRYPT_N = 1 << 14
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -152,8 +165,7 @@ def stamp(moment: int | float | None) -> str:
 
 class Store:
     def __init__(self, directory: Path) -> None:
-        directory.mkdir(parents=True, exist_ok=True)
-        self.path = directory / "auth.sqlite"
+        self.path = private_dir(directory) / "auth.sqlite"
         with self.connect() as connection:
             connection.executescript(SCHEMA)
 
@@ -295,7 +307,7 @@ class BuiltinProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refres
     def __init__(self, config: AuthConfig) -> None:
         self.config = config
         self.store = Store(config.auth_dir or auth_dir())
-        self.failures: dict[str, list[float]] = {}
+        self.failures: list[float] = []
 
     def register_routes(self, server: MCPServer) -> None:
         server.custom_route("/login", methods=["GET"])(self.login_page)
@@ -306,7 +318,7 @@ class BuiltinProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refres
         pending = self.store.load_request(request_id) if request_id else None
         if pending is None:
             return self.expired_page()
-        return HTMLResponse(self.render(request_id, pending, self.unconfigured()))
+        return page_response(self.render(request_id, pending, self.unconfigured()))
 
     async def login_submit(self, request: Request) -> Response:
         form = await request.form()
@@ -314,21 +326,20 @@ class BuiltinProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refres
         pending = self.store.load_request(request_id) if request_id else None
         if pending is None:
             return self.expired_page()
-        caller = request.client.host if request.client else "unknown"
-        if self.locked_out(caller):
-            return HTMLResponse(
+        if self.locked_out():
+            return page_response(
                 self.render(request_id, pending, "Too many failed attempts. Try again in a minute."), status_code=429
             )
         if not self.store.owner_matches(str(form.get("password") or "")):
-            self.record_failure(caller)
+            self.record_failure()
             message = self.unconfigured() or "Wrong password."
-            return HTMLResponse(self.render(request_id, pending, message), status_code=401)
+            return page_response(self.render(request_id, pending, message), status_code=401)
         granted = self.granted_scopes(pending["scopes"], form.get("read") is not None, form.get("write") is not None)
         if not granted:
-            return HTMLResponse(
+            return page_response(
                 self.render(request_id, pending, "Tick at least one of read and write."), status_code=400
             )
-        self.failures.pop(caller, None)
+        self.failures.clear()
         self.store.drop_request(request_id)
         code = self.mint_code(pending, granted)
         return RedirectResponse(
@@ -364,18 +375,18 @@ class BuiltinProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refres
         self.store.save_code(code, pending["client_id"], record["expires_at"], record)
         return code
 
-    def locked_out(self, caller: str) -> bool:
-        recent = self.recent_failures(caller)
+    def locked_out(self) -> bool:
+        recent = self.recent_failures()
         return len(recent) >= MAX_FAILURES and time.monotonic() - recent[-1] < LOCKOUT_SECONDS
 
-    def recent_failures(self, caller: str) -> list[float]:
-        cutoff = time.monotonic() - FAILURE_WINDOW
-        recent = [moment for moment in self.failures.get(caller, []) if moment > cutoff]
-        self.failures[caller] = recent
-        return recent
+    def recent_failures(self) -> list[float]:
+        cutoff = time.monotonic() - max(FAILURE_WINDOW, LOCKOUT_SECONDS)
+        self.failures = [moment for moment in self.failures if moment > cutoff][-MAX_FAILURES:]
+        return self.failures
 
-    def record_failure(self, caller: str) -> None:
-        self.failures.setdefault(caller, []).append(time.monotonic())
+    def record_failure(self) -> None:
+        self.recent_failures()
+        self.failures.append(time.monotonic())
 
     def render(self, request_id: str, pending: dict[str, Any], error: str = "") -> str:
         client = self.store.load_client(pending["client_id"])
@@ -397,7 +408,7 @@ class BuiltinProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refres
             lead="This login link has expired or was already used. Start the connection again from the client.",
             body="",
         )
-        return HTMLResponse(body, status_code=400)
+        return page_response(body, status_code=400)
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self.store.load_client(client_id)

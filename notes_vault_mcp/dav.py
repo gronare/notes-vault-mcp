@@ -19,6 +19,25 @@ from notes_vault_mcp.vault import SubjectVaults
 
 ALLOW = "OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY"
 XML = "application/xml; charset=utf-8"
+MAX_BODY_BYTES = 32 * 1024 * 1024
+
+
+class BodyTooLarge(Exception):
+    pass
+
+
+async def _bounded_body(request: Request, limit: int) -> bytes:
+    declared = request.headers.get("content-length")
+    if declared is not None and (not declared.isdigit() or int(declared) > limit):
+        raise BodyTooLarge
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise BodyTooLarge
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _now() -> datetime:
@@ -49,10 +68,13 @@ def _clean(raw: str) -> str | None:
 class WebDav:
     # A small WebDAV server over one subject's prefix: what Remotely Save needs, nothing more. The caller
     # authenticates with the personal token the `obsidian_access` tool minted; the username is informational.
-    def __init__(self, vaults: SubjectVaults, tokens: PersonalTokens, mount: str = "/dav") -> None:
+    def __init__(
+        self, vaults: SubjectVaults, tokens: PersonalTokens, mount: str = "/dav", max_body: int = MAX_BODY_BYTES
+    ) -> None:
         self.vaults = vaults
         self.tokens = tokens
         self.mount = mount.rstrip("/")
+        self.max_body = max_body
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -76,6 +98,8 @@ class WebDav:
             return await handler(request, backend, key)
         except NotFound:
             return Response("not found", 404)
+        except BodyTooLarge:
+            return Response(f"body larger than {self.max_body} bytes", 413)
 
     def _subject(self, request: Request) -> str | None:
         header = request.headers.get("authorization", "")
@@ -203,8 +227,8 @@ class WebDav:
     async def do_put(self, request: Request, backend: VaultBackend, key: str) -> Response:
         if key == "" or key.endswith("/"):
             return Response("cannot PUT a collection", 405, headers={"Allow": ALLOW})
+        data = await _bounded_body(request, self.max_body)
         existed = self._lookup(backend, key) is not None
-        data = await request.body()
         version = backend.put_bytes(key, data, request.headers.get("content-type") or None)
         return Response(status_code=204 if existed else 201, headers={"ETag": f'"{version}"'})
 
@@ -231,7 +255,7 @@ class WebDav:
                 backend.delete(folder)
 
     async def do_mkcol(self, request: Request, backend: VaultBackend, key: str) -> Response:
-        if await request.body():
+        if await _bounded_body(request, self.max_body):
             return Response("unsupported media type", 415)
         if key == "" or self._lookup(backend, key) is not None:
             return Response("already exists", 405, headers={"Allow": ALLOW})

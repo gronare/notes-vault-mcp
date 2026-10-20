@@ -54,6 +54,7 @@ def test_the_allowed_hosts_are_empty_when_unset(monkeypatch: pytest.MonkeyPatch)
 def test_the_allowed_hosts_reach_the_oauth_modes_too(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
     monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    monkeypatch.setenv("VAULT_OIDC_AUDIENCE", "vault")
     monkeypatch.setenv("VAULT_ALLOWED_HOSTS", "vault.svc.cluster.local")
     assert auth_config("oidc").allowed_hosts == ("vault.svc.cluster.local",)
 
@@ -73,6 +74,7 @@ def test_oidc_refuses_a_plain_http_public_url(monkeypatch: pytest.MonkeyPatch):
 def test_oidc_allows_http_on_localhost(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VAULT_PUBLIC_URL", "http://localhost:8765")
     monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    monkeypatch.setenv("VAULT_OIDC_AUDIENCE", "vault")
     assert auth_config("oidc").public_url == "http://localhost:8765"
 
 
@@ -96,20 +98,29 @@ def test_oidc_reads_the_issuer_audience_and_groups(monkeypatch: pytest.MonkeyPat
 def test_oidc_defaults_the_groups_to_vault_and_vault_writers(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
     monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    monkeypatch.setenv("VAULT_OIDC_AUDIENCE", "vault")
     config = auth_config("oidc")
     assert (config.read_group, config.write_group) == ("vault", "vault-writers")
-    assert config.audience == ""
+
+
+def test_oidc_refuses_to_start_without_an_audience(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
+    monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    with pytest.raises(ConfigError, match="VAULT_OIDC_AUDIENCE"):
+        auth_config("oidc")
 
 
 def test_oidc_asks_the_provider_for_openid_profile_email_and_groups(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
     monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    monkeypatch.setenv("VAULT_OIDC_AUDIENCE", "vault")
     assert auth_config("oidc").idp_scopes == ("openid", "profile", "email", "groups")
 
 
 def test_the_provider_scopes_come_from_the_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("VAULT_PUBLIC_URL", "https://vault.example.com")
     monkeypatch.setenv("VAULT_OIDC_ISSUER", "https://idp.example.com")
+    monkeypatch.setenv("VAULT_OIDC_AUDIENCE", "vault")
     monkeypatch.setenv("VAULT_OIDC_SCOPES", "openid  groups")
     assert auth_config("oidc").idp_scopes == ("openid", "groups")
 

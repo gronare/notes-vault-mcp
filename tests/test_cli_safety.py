@@ -97,7 +97,6 @@ def test_one_line_prefixes_and_flattens_any_exception():
     assert one_line(RuntimeError("notes-vault-mcp: already prefixed")) == "notes-vault-mcp: already prefixed"
 
 
-@pytest.mark.xfail(strict=True, reason="bug: changelog with a period that is not YYYY or YYYY-MM dies with a traceback")
 def test_changelog_with_a_bad_period_fails_on_one_line(vault, capsys):
     try:
         code = main(["changelog", "orchard", "yesterday"])

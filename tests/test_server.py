@@ -73,17 +73,18 @@ async def test_write_then_read_round_trips(vault: Vault):
 
 
 @pytest.mark.anyio
-async def test_write_file_stores_the_schema_and_bases_verbatim(vault: Vault):
-    schema = "version: 1\nfolders:\n  Areas: { kind: system }\n"
-    base = "views:\n  - type: table\n    name: Areas\n"
+async def test_write_file_refuses_the_schema_and_bases_but_read_file_serves_them(vault: Vault, vault_dir):
+    (vault_dir / ".vault").mkdir(exist_ok=True)
+    (vault_dir / ".vault" / "schema.yml").write_text("version: 1\n", encoding="utf-8")
+    (vault_dir / "Areas.base").write_text("views: []\n", encoding="utf-8")
     async with Client(build_server(vault)) as client:
-        written = await text_of(client, "write_file", {"path": ".vault/schema.yml", "content": schema})
-        await text_of(client, "write_file", {"path": "Areas.base", "content": base})
+        schema = await client.call_tool("write_file", {"path": ".vault/schema.yml", "content": "version: 2\n"})
+        base = await client.call_tool("write_file", {"path": "Areas.base", "content": "views: [x]\n"})
         read_schema = await text_of(client, "read_file", {"path": ".vault/schema.yml"})
         read_base = await text_of(client, "read_file", {"path": "Areas.base"})
-    assert written.startswith("Written: .vault/schema.yml\netag: ")
-    assert read_schema.split("\n", 1)[1] == schema
-    assert read_base.split("\n", 1)[1] == base
+    assert schema.is_error and base.is_error
+    assert read_schema.split("\n", 1)[1] == "version: 1\n"
+    assert read_base.split("\n", 1)[1] == "views: []\n"
 
 
 @pytest.mark.anyio

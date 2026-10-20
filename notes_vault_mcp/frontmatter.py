@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 import re
 from typing import Any
 
@@ -10,8 +9,8 @@ from notes_vault_mcp.schema import Schema
 
 FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 AREA_RE = re.compile(r"^\[\[[^\]|]+(\|[^\]]+)?\]\]$")
-PLAIN_SCALAR_RE = re.compile(r"^[^\s\"'\[\]{}#&*!|>%@`,][^:#\n]*$")
-RESERVED_WORDS = frozenset({"true", "false", "yes", "no", "on", "off", "null", "~", ""})
+MAX_FRONTMATTER_CHARS = 64 * 1024
+MAX_ALIASES = 8
 
 
 class FrontmatterError(Exception):
@@ -24,17 +23,35 @@ class FrontmatterError(Exception):
         return f"line {self.line}: {self.message}"
 
 
+class _BoundedLoader(yaml.SafeLoader):
+    def __init__(self, stream: str) -> None:
+        super().__init__(stream)
+        self.aliases = 0
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(yaml.AliasEvent):
+            self.aliases += 1
+            if self.aliases > MAX_ALIASES:
+                raise FrontmatterError(f"more than {MAX_ALIASES} YAML aliases", self.peek_event().start_mark.line + 2)
+        return super().compose_node(parent, index)
+
+
 def parse(text: str) -> tuple[dict[str, Any], str]:
     match = FRONTMATTER_RE.match(text)
     if match is None:
         return {}, text
+    if len(match.group(1)) > MAX_FRONTMATTER_CHARS:
+        raise FrontmatterError(f"frontmatter is longer than {MAX_FRONTMATTER_CHARS} characters")
+    loader = _BoundedLoader(match.group(1) + "\n")
     try:
-        loaded = yaml.safe_load(match.group(1))
+        loaded = loader.get_single_data()
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         line = (mark.line + 2) if mark is not None else 1
         problem = getattr(exc, "problem", None) or "invalid YAML"
         raise FrontmatterError(problem, line) from exc
+    finally:
+        loader.dispose()
     if loaded is None:
         return {}, text[match.end() :]
     if not isinstance(loaded, dict):
@@ -42,34 +59,44 @@ def parse(text: str) -> tuple[dict[str, Any], str]:
     return loaded, text[match.end() :]
 
 
-def _scalar(value: Any) -> str:
-    if isinstance(value, dt.datetime):
-        return value.date().isoformat()
-    if isinstance(value, dt.date):
-        return value.isoformat()
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if value is None:
-        return ""
-    if isinstance(value, (int, float)):
-        return str(value)
-    text = str(value)
-    if text.lower() in RESERVED_WORDS or not PLAIN_SCALAR_RE.match(text):
-        return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return text
+class _Dumper(yaml.SafeDumper):
+    def choose_scalar_style(self) -> str:
+        style = super().choose_scalar_style()
+        return '"' if style == "'" else style
+
+
+def _represent_str(dumper: _Dumper, value: str) -> yaml.ScalarNode:
+    style = "|" if "\n" in value.rstrip("\n") else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+def _represent_none(dumper: _Dumper, _value: None) -> yaml.ScalarNode:
+    return dumper.represent_scalar("tag:yaml.org,2002:null", "")
+
+
+def _represent_list(dumper: _Dumper, value: list) -> yaml.SequenceNode:
+    flat = all(not isinstance(item, (dict, list, tuple)) for item in value)
+    return dumper.represent_sequence("tag:yaml.org,2002:seq", value, flow_style=flat)
+
+
+def _represent_dict(dumper: _Dumper, value: dict) -> yaml.MappingNode:
+    return dumper.represent_mapping("tag:yaml.org,2002:map", value, flow_style=False)
+
+
+_Dumper.add_representer(str, _represent_str)
+_Dumper.add_representer(type(None), _represent_none)
+_Dumper.add_representer(list, _represent_list)
+_Dumper.add_representer(tuple, _represent_list)
+_Dumper.add_representer(dict, _represent_dict)
 
 
 def dump(frontmatter: dict[str, Any], body: str) -> str:
-    lines = ["---"]
-    for key, value in frontmatter.items():
-        if isinstance(value, (list, tuple)):
-            lines.append(f"{key}: [{', '.join(_scalar(item) for item in value)}]")
-        elif value is None:
-            lines.append(f"{key}:")
-        else:
-            lines.append(f"{key}: {_scalar(value)}")
-    lines.append("---")
-    return "\n".join(lines) + "\n\n" + body.lstrip("\n")
+    block = (
+        yaml.dump(frontmatter, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=1 << 30)
+        if frontmatter
+        else ""
+    )
+    return f"---\n{block}---\n\n" + body.lstrip("\n")
 
 
 def folder_of(key: str) -> str:
@@ -82,7 +109,9 @@ def tags_of(frontmatter: dict[str, Any]) -> list[str]:
         return []
     if isinstance(raw, str):
         return [part.strip() for part in raw.split(",") if part.strip()]
-    return [str(item).strip() for item in raw if str(item).strip()]
+    if isinstance(raw, (list, tuple)):
+        return [str(item).strip() for item in raw if str(item).strip()]
+    return [str(raw).strip()] if str(raw).strip() else []
 
 
 def _missing(frontmatter: dict[str, Any], field: str) -> bool:
@@ -95,6 +124,10 @@ def validate(frontmatter: dict[str, Any], key: str, schema: Schema) -> list[str]
     for field in schema.required_fields:
         if _missing(frontmatter, field):
             problems.append(f"missing required field: {field}")
+
+    tags = frontmatter.get("tags")
+    if tags is not None and not isinstance(tags, (list, str)):
+        problems.append(f"tags must be a list, not {type(tags).__name__}")
 
     status = frontmatter.get("status")
     if status is not None and str(status) not in schema.status_values:

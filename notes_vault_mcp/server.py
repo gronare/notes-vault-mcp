@@ -12,12 +12,12 @@ from notes_vault_mcp.auth.scopes import ScopeError, require_write
 from notes_vault_mcp.backends import VaultError
 from notes_vault_mcp.frontmatter import FrontmatterError
 from notes_vault_mcp.schema import instructions
-from notes_vault_mcp.search import render, search
+from notes_vault_mcp.search import QueryError, render, search
 from notes_vault_mcp.vault import SingleVault, Vault, VaultResolver, open_vault
 
 VERSION = "0.6.1"
 
-EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError, ScopeError)
+EXPECTED_FAILURES = (VaultError, FrontmatterError, notes.ValidationError, ScopeError, QueryError)
 
 SEARCH_DESCRIPTION = (
     "CHEAP — start here. Full-text search over the local SQLite index of the vault; it never "
@@ -50,9 +50,9 @@ def build_server(
         try:
             if write:
                 require_write()
-            vault = resolver.current()
-            vault.index.sync(force=force)
-            return action(vault)
+            with resolver.using() as vault:
+                vault.index.sync(force=force)
+                return action(vault)
         except EXPECTED_FAILURES as exc:
             raise ToolError(str(exc)) from exc
 
@@ -113,12 +113,21 @@ def build_server(
 
     @server.tool(
         name="append_file",
-        description="WRITE — appends to a note and bumps `updated`. Creates the note when it is missing.",
+        description=(
+            "WRITE — appends to an existing note and bumps `updated`; the note must still satisfy the schema. "
+            "A missing note is refused: create it with write_file."
+        ),
     )
     def append_file(path: str, content: str) -> str:
         return run(lambda vault: notes.append(vault, path, content), write=True)
 
-    @server.tool(name="move_file", description="WRITE — moves or renames a note. Use `close` to archive finished work.")
+    @server.tool(
+        name="move_file",
+        description=(
+            "WRITE — moves or renames a note; the note must satisfy the schema at the destination. "
+            "Use `close` to archive finished work."
+        ),
+    )
     def move_file(source: str, dest: str) -> str:
         return run(lambda vault: notes.move(vault, source, dest), write=True)
 

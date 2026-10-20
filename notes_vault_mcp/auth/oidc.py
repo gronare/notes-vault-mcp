@@ -44,6 +44,8 @@ class OidcVerifier:
         return self._access_token(token, claims, scopes) if scopes else None
 
     async def _claims(self, token: str, kid: str) -> dict[str, Any] | None:
+        if not self.config.audience:
+            return None
         key = await self._key(kid)
         if key is None:
             return None
@@ -52,8 +54,8 @@ class OidcVerifier:
             key=key,
             algorithms=ALGORITHMS,
             issuer=self.config.issuer,
-            audience=self.config.audience or None,
-            options={"verify_aud": bool(self.config.audience), "require": ["exp", "iss"]},
+            audience=self.config.audience,
+            options={"require": ["exp", "iss", "aud"]},
         )
 
     async def _key(self, kid: str) -> jwt.PyJWK | None:

@@ -141,11 +141,20 @@ def test_local_list_all_includes_directories_and_non_notes(vault_dir: Path):
     assert [entry.key for entry in backend.list_all("Attachments/")] == ["Attachments/", "Attachments/pic.png"]
 
 
-def test_local_delete_removes_a_whole_directory(vault_dir: Path):
+def test_local_delete_removes_an_empty_directory_and_refuses_a_full_one(vault_dir: Path):
+    from notes_vault_mcp.backends import VaultError
+
     backend = LocalBackend(vault_dir)
     backend.put_bytes("Tmp/a/b.txt", b"x")
+    with pytest.raises(VaultError):
+        backend.delete("Tmp/")
+    assert (vault_dir / "Tmp" / "a" / "b.txt").is_file()
+    backend.delete("Tmp/a/b.txt")
+    backend.delete("Tmp/a/")
     backend.delete("Tmp/")
     assert not (vault_dir / "Tmp").exists()
+    with pytest.raises(VaultError):
+        backend.delete("")
 
 
 def test_make_subject_backend_nests_the_subject_under_the_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -174,3 +183,15 @@ def test_make_subject_backend_extends_the_s3_prefix(monkeypatch: pytest.MonkeyPa
         backend, _ = make_subject_backend("1042", "users")
     assert isinstance(backend, S3Backend)
     assert backend.prefix == "vault/users/1042/"
+
+
+def test_local_list_all_walks_only_what_the_prefix_names(vault_dir: Path):
+    backend = LocalBackend(vault_dir)
+    backend.put("Areas.base", "views: []\n")
+    under = {entry.key for entry in backend.list_all("Areas/")}
+    named = {entry.key for entry in backend.list_all("Areas")}
+    assert "Areas/" in under and "Areas/orchard.md" in under and "Areas.base" not in under
+    assert {"Areas/", "Areas/orchard.md", "Areas.base"} <= named
+    assert not any(key.startswith("Projects") for key in under | named)
+    assert backend.list_all("Nope/") == []
+    assert {entry.key for entry in backend.list_all("")} >= under | named

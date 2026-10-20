@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +23,7 @@ OPEN_RETRY_SECONDS = 60
 OPEN_RETRY_PAUSE = 0.5
 SHA_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b")
 WIKILINK_RE = re.compile(r"\[\[([^\]\n]+)\]\]")
+FIELD_TEXT_MAX = 10_000
 
 FTS_SQL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
@@ -118,8 +122,13 @@ def _as_text(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, (list, tuple)):
-        return ", ".join(str(item) for item in value)
-    return str(value)
+        return ", ".join(str(item) for item in value)[:FIELD_TEXT_MAX]
+    return str(value)[:FIELD_TEXT_MAX]
+
+
+def broken_note(key: str, version: str, mtime: float, size: int, error: str) -> Note:
+    stem = stem_of(key)
+    return Note(key, version, mtime, folder_of(key), stem, title=stem, valid=False, error=error, size=size)
 
 
 def note_from_text(key: str, text: str, version: str, mtime: float, size: int) -> tuple[Note, str]:
@@ -127,10 +136,7 @@ def note_from_text(key: str, text: str, version: str, mtime: float, size: int) -
     try:
         frontmatter, body = parse(text)
     except FrontmatterError as exc:
-        note.valid = False
-        note.error = str(exc)
-        note.title = note.stem
-        return note, text
+        return broken_note(key, version, mtime, size, str(exc)), text
     note.title = _as_text(frontmatter.get("title")) or note.stem
     note.summary = _as_text(frontmatter.get("summary"))
     note.status = _as_text(frontmatter.get("status"))
@@ -181,12 +187,40 @@ class Index:
         self.backend = backend
         self.languages = tuple(languages)
         self.algorithms = algorithms_of(self.languages)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, check_same_thread=False, timeout=BUSY_TIMEOUT_MS / 1000)
-        self.db.row_factory = sqlite3.Row
-        self.db.create_function("casefold", 1, _casefold, deterministic=True)
-        self.db.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._connections_lock = threading.Lock()
+        self._write_lock = threading.RLock()
         self._prepare_with_retry()
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        connection = getattr(self._local, "db", None)
+        if connection is None:
+            connection = sqlite3.connect(self.path, check_same_thread=False, timeout=BUSY_TIMEOUT_MS / 1000)
+            connection.row_factory = sqlite3.Row
+            connection.create_function("casefold", 1, _casefold, deterministic=True)
+            connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            self._local.db = connection
+            with self._connections_lock:
+                self._connections.append(connection)
+        return connection
+
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        with self._write_lock:
+            db = self.db
+            if db.in_transaction:
+                yield db
+                return
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+            except BaseException:
+                db.rollback()
+                raise
+            db.commit()
 
     def _prepare_with_retry(self) -> None:
         deadline = time.time() + OPEN_RETRY_SECONDS
@@ -225,35 +259,48 @@ class Index:
         self.db.execute("DELETE FROM meta WHERE k = 'last_sync'")
 
     def close(self) -> None:
-        self.db.close()
+        with self._connections_lock:
+            connections, self._connections = self._connections, []
+        for connection in connections:
+            connection.close()
+        self._local = threading.local()
 
     def meta(self, key: str) -> str | None:
         row = self.db.execute("SELECT v FROM meta WHERE k = ?", (key,)).fetchone()
         return row["v"] if row else None
 
     def set_meta(self, key: str, value: str) -> None:
-        self.db.execute("INSERT INTO meta(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", (key, value))
+        with self._transaction() as db:
+            db.execute("INSERT INTO meta(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", (key, value))
 
     def remember_repo(self, repo: str, root: str) -> None:
-        self.db.execute(
-            "INSERT INTO repos(repo, root, seen_at) VALUES(?, ?, ?) "
-            "ON CONFLICT(repo) DO UPDATE SET root = excluded.root, seen_at = excluded.seen_at",
-            (repo, root, time.strftime("%Y-%m-%d")),
-        )
-        self.db.commit()
+        with self._transaction() as db:
+            db.execute(
+                "INSERT INTO repos(repo, root, seen_at) VALUES(?, ?, ?) "
+                "ON CONFLICT(repo) DO UPDATE SET root = excluded.root, seen_at = excluded.seen_at",
+                (repo, root, time.strftime("%Y-%m-%d")),
+            )
 
     def forget_repo(self, repo: str) -> None:
-        self.db.execute("DELETE FROM repos WHERE repo = ?", (repo,))
-        self.db.commit()
+        with self._transaction() as db:
+            db.execute("DELETE FROM repos WHERE repo = ?", (repo,))
 
     def known_repos(self) -> list[tuple[str, str]]:
         rows = self.db.execute("SELECT repo, root FROM repos ORDER BY repo").fetchall()
         return [(row["repo"], row["root"]) for row in rows]
 
     def upsert(self, key: str, text: str, version: str, mtime: float, size: int) -> Note:
-        note, body = note_from_text(key, text, version, mtime, size)
-        self.remove(key)
-        self.db.execute(
+        try:
+            note, body = note_from_text(key, text, version, mtime, size)
+        except Exception as exc:
+            note, body = broken_note(key, version, mtime, size, f"could not index: {exc}"), ""
+        with self._transaction() as db:
+            self._delete(db, key)
+            self._insert(db, note, body, text)
+        return note
+
+    def _insert(self, db: sqlite3.Connection, note: Note, body: str, text: str) -> None:
+        db.execute(
             f"INSERT INTO notes ({NOTE_COLUMNS}) VALUES ({', '.join('?' * 20)})",
             (
                 note.key,
@@ -278,25 +325,27 @@ class Index:
                 note.source,
             ),
         )
-        self.db.execute(
+        db.execute(
             "INSERT INTO notes_fts(title, summary, tags, body, stem, stemmed, key) VALUES(?, ?, ?, ?, ?, ?, ?)",
             (note.title, note.summary, " ".join(note.tags), body, note.stem, self._stemmed(note, body), note.key),
         )
-        self.db.executemany("INSERT INTO shas(sha, key) VALUES(?, ?)", [(sha, key) for sha in shas_in(text)])
-        self.db.executemany("INSERT INTO links(src, target) VALUES(?, ?)", [(key, t) for t in link_targets(text)])
-        self.db.commit()
-        return note
+        db.executemany("INSERT INTO shas(sha, key) VALUES(?, ?)", [(sha, note.key) for sha in shas_in(text)])
+        db.executemany("INSERT INTO links(src, target) VALUES(?, ?)", [(note.key, t) for t in link_targets(text)])
 
     def _stemmed(self, note: Note, body: str) -> str:
         texts = (note.title, note.summary, " ".join(note.tags), body, note.stem)
         return "\n".join(stemmed("\n".join(texts), self.algorithms))
 
+    @staticmethod
+    def _delete(db: sqlite3.Connection, key: str) -> None:
+        db.execute("DELETE FROM notes WHERE key = ?", (key,))
+        db.execute("DELETE FROM notes_fts WHERE key = ?", (key,))
+        db.execute("DELETE FROM shas WHERE key = ?", (key,))
+        db.execute("DELETE FROM links WHERE src = ?", (key,))
+
     def remove(self, key: str) -> None:
-        self.db.execute("DELETE FROM notes WHERE key = ?", (key,))
-        self.db.execute("DELETE FROM notes_fts WHERE key = ?", (key,))
-        self.db.execute("DELETE FROM shas WHERE key = ?", (key,))
-        self.db.execute("DELETE FROM links WHERE src = ?", (key,))
-        self.db.commit()
+        with self._transaction() as db:
+            self._delete(db, key)
 
     def note(self, key: str) -> Note | None:
         row = self.db.execute(f"SELECT {NOTE_COLUMNS} FROM notes WHERE key = ?", (key,)).fetchone()
@@ -357,12 +406,11 @@ class Index:
             self.remove(gone)
         self._fetch(changed)
         self.set_meta("last_sync", str(time.time()))
-        self.db.commit()
         return len(changed)
 
     def rebuild(self) -> int:
-        for table in ("notes", "notes_fts", "shas", "links"):
-            self.db.execute(f"DELETE FROM {table}")
-        self.db.execute("DELETE FROM meta WHERE k = 'last_sync'")
-        self.db.commit()
+        with self._transaction() as db:
+            for table in ("notes", "notes_fts", "shas", "links"):
+                db.execute(f"DELETE FROM {table}")
+            db.execute("DELETE FROM meta WHERE k = 'last_sync'")
         return self.sync(force=True)

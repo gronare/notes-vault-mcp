@@ -6,7 +6,7 @@ from test_notes import body_of
 from notes_vault_mcp import notes
 from notes_vault_mcp.frontmatter import FrontmatterError, dump, parse, tags_of
 from notes_vault_mcp.index import note_from_text
-from notes_vault_mcp.search import search, terms_of
+from notes_vault_mcp.search import QueryError, search, terms_of
 from notes_vault_mcp.vault import Vault
 
 HEAD = "---\ntitle: Note\ndate: 2026-08-01\nupdated: 2026-08-01\ntags: [orchard]\nstatus: active\n"
@@ -25,10 +25,6 @@ def _aliased_frontmatter(levels: int, width: int = 10) -> str:
 # --- yaml -----------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: YAML aliases in frontmatter expand without bound; 8 levels make a 500 MB title, 9 exhaust memory",
-)
 def test_aliased_frontmatter_cannot_blow_up_the_index():
     text = f"---\n{_aliased_frontmatter(6)}\n---\nbody\n"
     note, _ = note_from_text("Areas/laughs.md", text, "v", 0.0, len(text))
@@ -53,18 +49,52 @@ def test_a_broken_note_is_indexed_as_invalid_rather_than_breaking_the_sync(vault
     assert note is not None and note.valid is False and note.error.startswith("line ")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a scalar tags value makes tags_of raise TypeError, which aborts the sync of the whole vault",
-)
 def test_a_note_with_a_scalar_tags_value_does_not_break_the_sync(vault: Vault, vault_dir):
     (vault_dir / "Areas" / "odd.md").write_text("---\ntitle: Odd\ntags: 5\n---\nbody\n", encoding="utf-8")
     vault.index.sync(force=True)
     assert vault.index.note("Areas/odd.md") is not None
 
 
+def test_a_scalar_tags_value_is_a_lint_finding(vault: Vault, vault_dir):
+    (vault_dir / "Areas" / "odd.md").write_text(
+        HEAD.replace("tags: [orchard]", "tags: 5") + "---\nbody\n", encoding="utf-8"
+    )
+    vault.index.sync(force=True)
+    assert "Areas/odd.md: tags must be a list, not int" in notes.lint(vault).groups["invalid_field"]
+
+
+def test_a_note_that_cannot_be_read_into_a_row_is_indexed_as_invalid_and_the_sync_goes_on(
+    vault: Vault, vault_dir, monkeypatch: pytest.MonkeyPatch
+):
+    from notes_vault_mcp import index
+
+    real = index.note_from_text
+
+    def explode(key, *args):
+        if key == "Areas/odd.md":
+            raise TypeError("surprise")
+        return real(key, *args)
+
+    monkeypatch.setattr(index, "note_from_text", explode)
+    (vault_dir / "Areas" / "odd.md").write_text("---\ntitle: Odd\n---\nbody\n", encoding="utf-8")
+    (vault_dir / "Areas" / "fine.md").write_text("---\ntitle: Fine\n---\nbody\n", encoding="utf-8")
+    vault.index.sync(force=True)
+    odd = vault.index.note("Areas/odd.md")
+    assert odd is not None and odd.valid is False and "surprise" in odd.error
+    assert vault.index.note("Areas/fine.md").valid
+
+
+def test_an_oversized_frontmatter_is_refused_before_yaml_reads_it():
+    with pytest.raises(FrontmatterError, match="longer than"):
+        parse("---\ntitle: " + "x" * 70_000 + "\n---\nbody\n")
+
+
+def test_a_few_aliases_still_parse():
+    frontmatter, _ = parse("---\nbase: &b [x]\ntags: *b\n---\nbody\n")
+    assert frontmatter["tags"] == ["x"]
+
+
 @pytest.mark.parametrize("raw", [5, True, 3.5])
-@pytest.mark.xfail(strict=True, reason="bug: tags_of raises TypeError on a scalar tags value")
 def test_tags_of_tolerates_a_scalar(raw):
     assert isinstance(tags_of({"tags": raw}), list)
 
@@ -88,17 +118,12 @@ def test_frontmatter_values_of_every_type_index_as_text(vault: Vault, vault_dir)
 # --- dump round trips -----------------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="bug: dump writes a key containing ': ' unquoted, and the note no longer parses")
 def test_a_key_containing_a_colon_survives_a_rewrite(vault: Vault):
     notes.write(vault, "Areas/colon.md", HEAD + '"odd: key": 1\n---\n\nBody.\n')
     frontmatter, _ = body_of(vault, "Areas/colon.md")
     assert frontmatter["odd: key"] == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: dump stringifies a nested mapping, so Obsidian property objects are destroyed on set_status",
-)
 def test_a_nested_mapping_survives_set_status(vault: Vault, vault_dir):
     (vault_dir / "Projects" / "nested.md").write_text(
         HEAD + 'kind: task\narea: "[[orchard]]"\nmeta:\n  owner: carl\n---\n\nBody.\n', encoding="utf-8"
@@ -109,10 +134,6 @@ def test_a_nested_mapping_survives_set_status(vault: Vault, vault_dir):
     assert frontmatter["meta"] == {"owner": "carl"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: dump folds a block scalar onto one line, altering multi-line summaries on every rewrite",
-)
 def test_a_block_scalar_survives_a_rewrite(vault: Vault):
     notes.write(vault, "Areas/block.md", HEAD + "summary: |\n  line one\n  line two\n---\n\nBody.\n")
     frontmatter, _ = body_of(vault, "Areas/block.md")
@@ -137,15 +158,10 @@ def test_dump_writes_a_string_that_reads_back_as_the_same_string(value: str):
 
 
 @pytest.mark.parametrize("value", RETYPED_STRINGS)
-@pytest.mark.xfail(strict=True, reason="bug: a numeric-looking string is written unquoted and reads back as a number")
 def test_dump_quotes_a_string_yaml_would_read_as_a_number(value: str):
     assert _round_trip(value) == (value, [value])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a value starting with '- ' is written unquoted and the note no longer parses",
-)
 def test_dump_quotes_a_string_starting_like_a_sequence_entry():
     assert _round_trip("- dash") == ("- dash", ["- dash"])
 
@@ -185,10 +201,6 @@ def test_any_query_text_is_a_literal_search_and_never_an_error(vault: Vault, que
     assert vault.index.note("Areas/orchard.md") is not None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a NUL byte in the query reaches FTS5 and raises OperationalError: unterminated string",
-)
 def test_a_nul_byte_in_the_query_is_a_literal_search_too(vault: Vault):
     assert search(vault.index, vault.schema, "orchard\u0000").total >= 0
 
@@ -208,13 +220,21 @@ def test_limit_zero_counts_but_returns_no_rows(vault: Vault):
     assert result.rows == [] and result.total > 0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a since value that is not ISO is compared as text and silently hides every note",
-)
 def test_a_non_iso_since_is_refused_or_ignored(vault: Vault):
-    result = search(vault.index, vault.schema, "orchard", since="yesterday")
-    assert result.total > 0
+    with pytest.raises(QueryError, match="ISO date"):
+        search(vault.index, vault.schema, "orchard", since="yesterday")
+    assert search(vault.index, vault.schema, "orchard", since="2000-01-01").total > 0
+
+
+@pytest.mark.anyio
+async def test_a_non_iso_since_is_a_tool_error(vault: Vault):
+    from mcp.client import Client
+
+    from notes_vault_mcp.server import build_server
+
+    async with Client(build_server(vault)) as client:
+        result = await client.call_tool("search", {"query": "orchard", "since": "yesterday"})
+    assert result.is_error
 
 
 def test_terms_of_survives_an_unbalanced_quote():

@@ -31,6 +31,9 @@ def _key_pool() -> tuple[Any, ...]:
     return tuple(rsa.generate_private_key(public_exponent=65537, key_size=2048) for _ in range(5))
 
 
+AUDIENCE = "vault"
+
+
 class Idp:
     def __init__(self, issuer: str = ISSUER) -> None:
         self.issuer = issuer
@@ -49,7 +52,7 @@ class Idp:
         return key
 
     def token(self, kid: str = "one", userinfo: dict[str, Any] | None = None, **claims: Any) -> str:
-        payload = {"iss": self.issuer, "sub": "ida", "exp": int(time.time()) + 300, **claims}
+        payload = {"iss": self.issuer, "sub": "ida", "aud": AUDIENCE, "exp": int(time.time()) + 300, **claims}
         encoded = jwt.encode(payload, self.private[kid], algorithm="RS256", headers={"kid": kid})
         if userinfo is not None:
             self.profiles[encoded] = userinfo
@@ -98,7 +101,11 @@ class Idp:
         return OidcVerifier(self.config(**overrides), client=self.client())
 
     def config(self, **overrides: Any) -> AuthConfig:
-        settings: dict[str, Any] = {"public_url": "https://vault.example.com", "issuer": self.issuer}
+        settings: dict[str, Any] = {
+            "public_url": "https://vault.example.com",
+            "issuer": self.issuer,
+            "audience": AUDIENCE,
+        }
         settings.update(overrides)
         return AuthConfig(mode="oidc", **settings)
 
@@ -188,15 +195,21 @@ async def test_the_configured_audience_is_accepted(idp: Idp):
 
 
 @pytest.mark.anyio
-async def test_any_audience_is_accepted_when_none_is_configured(idp: Idp):
-    token = await idp.verifier().verify_token(idp.token(groups=["vault"], aud="grafana"))
-    assert token is not None
+async def test_no_token_is_accepted_when_no_audience_is_configured(idp: Idp):
+    verifier = idp.verifier(audience="")
+    assert await verifier.verify_token(idp.token(groups=["vault"], aud="grafana")) is None
+    assert await verifier.verify_token(idp.token(groups=["vault"])) is None
+
+
+@pytest.mark.anyio
+async def test_a_token_without_an_audience_is_refused(idp: Idp):
+    assert await idp.verifier().verify_token(idp.token(groups=["vault"], aud=None)) is None
 
 
 @pytest.mark.anyio
 async def test_the_access_token_carries_the_subject_resource_and_claims(idp: Idp):
-    verifier = idp.verifier()
-    token = await verifier.verify_token(idp.token(groups=["vault"], azp="pocket-id-client"))
+    verifier = idp.verifier(audience="pocket-id-client")
+    token = await verifier.verify_token(idp.token(groups=["vault"], azp="pocket-id-client", aud="pocket-id-client"))
     assert token is not None
     assert token.subject == "ida"
     assert token.resource == "https://vault.example.com/mcp"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -22,11 +23,16 @@ def env(name: str, default: str | None = None) -> str | None:
     return default
 
 
+def private_dir(path: Path) -> Path:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        path.chmod(0o700)
+    return path
+
+
 def cache_dir() -> Path:
     raw = env("VAULT_CACHE_DIR") or "~/.cache/notes-vault-mcp"
-    path = Path(raw).expanduser()
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return private_dir(Path(raw).expanduser())
 
 
 def vault_id(seed: str) -> str:

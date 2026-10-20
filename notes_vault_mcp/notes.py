@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from notes_vault_mcp.backends import NotFound
+from notes_vault_mcp.backends import SCHEMA_KEY, NotFound
 from notes_vault_mcp.frontmatter import dump, parse, validate
 from notes_vault_mcp.index import Note, expand_home, stem_of
 from notes_vault_mcp.search import age_days, humanize_age
@@ -31,8 +31,36 @@ class ValidationError(Exception):
     pass
 
 
+class InvalidKey(ValidationError, NotFound):
+    pass
+
+
+NOTE_SUFFIX = ".md"
+READABLE_SUFFIXES = (".md", ".base")
+
+
+def note_key(path: str, readable: bool = False) -> str:
+    if readable and path == SCHEMA_KEY:
+        return path
+    if not path or "\x00" in path or "\\" in path or path.startswith("/") or re.match(r"^[A-Za-z]:", path):
+        raise InvalidKey(f"not a vault path: {path!r}")
+    segments = path.split("/")
+    if any(segment in ("", ".", "..") for segment in segments):
+        raise InvalidKey(f"not a vault path: {path!r} (empty, '.' and '..' segments are refused)")
+    if any(segment.startswith(".") for segment in segments):
+        raise InvalidKey(f"not a vault path: {path!r} (dot-folders and dot-files are outside the note set)")
+    if not path.endswith(READABLE_SUFFIXES if readable else NOTE_SUFFIX):
+        suffixes = " or ".join(READABLE_SUFFIXES) if readable else NOTE_SUFFIX
+        raise InvalidKey(f"not a note: {path!r} (a note path ends in {suffixes})")
+    return path
+
+
 def today() -> str:
     return date.today().isoformat()
+
+
+def stamp() -> date:
+    return date.today()
 
 
 def _read(vault: Vault, path: str) -> tuple[str, str]:
@@ -44,7 +72,7 @@ def _reindex(vault: Vault, path: str, text: str, version: str) -> None:
 
 
 def read(vault: Vault, path: str) -> str:
-    text, version = _read(vault, path)
+    text, version = _read(vault, note_key(path, readable=True))
     frontmatter, body = parse(text)
     superseded_by = frontmatter.get("superseded_by")
     if superseded_by:
@@ -55,62 +83,68 @@ def read(vault: Vault, path: str) -> str:
 
 def _with_dates(frontmatter: dict) -> dict:
     stamped = dict(frontmatter)
-    stamped["updated"] = today()
+    stamped["updated"] = stamp()
     if not stamped.get("date"):
         ordered: dict = {}
         for key, value in stamped.items():
             ordered[key] = value
             if key == "title":
-                ordered["date"] = today()
-        ordered.setdefault("date", today())
+                ordered["date"] = stamp()
+        ordered.setdefault("date", stamp())
         stamped = ordered
     return stamped
 
 
-def is_note(path: str) -> bool:
-    return path.endswith(".md") and not path.startswith(".vault/")
+def _require_valid(vault: Vault, frontmatter: dict, key: str, verdict: str) -> None:
+    problems = validate(frontmatter, key, vault.schema)
+    if problems:
+        raise ValidationError("\n".join([f"{key} {verdict}:", *[f"- {p}" for p in problems]]))
 
 
 def write(vault: Vault, path: str, content: str, expected_etag: str | None = None) -> str:
-    if not is_note(path):
-        version = vault.backend.put(path, content, expected_version=expected_etag)
-        return f"Written: {path}\netag: {version}"
+    key = note_key(path)
     frontmatter, body = parse(content)
     stamped = _with_dates(frontmatter)
-    problems = validate(stamped, path, vault.schema)
-    if problems:
-        raise ValidationError("\n".join([f"{path} is not a valid note:", *[f"- {p}" for p in problems]]))
+    _require_valid(vault, stamped, key, "is not a valid note")
     text = dump(stamped, body)
-    version = vault.backend.put(path, text, expected_version=expected_etag)
-    _reindex(vault, path, text, version)
-    return f"Written: {path}\netag: {version}"
+    version = vault.backend.put(key, text, expected_version=expected_etag)
+    _reindex(vault, key, text, version)
+    return f"Written: {key}\netag: {version}"
 
 
 def append(vault: Vault, path: str, content: str) -> str:
+    key = note_key(path)
     try:
-        existing, _ = _read(vault, path)
-    except NotFound:
-        existing = ""
+        existing, _ = _read(vault, key)
+    except NotFound as exc:
+        raise NotFound(f"{key} (append_file extends a note; write_file creates one)") from exc
     frontmatter, body = parse(existing)
+    stamped = _with_dates(frontmatter)
+    _require_valid(vault, stamped, key, "would not be a valid note")
     body = f"{body.rstrip()}\n{content}\n" if body.strip() else f"{content}\n"
-    text = dump(_with_dates(frontmatter), body) if frontmatter else body
-    version = vault.backend.put(path, text)
-    _reindex(vault, path, text, version)
-    return f"Appended to: {path}"
+    text = dump(stamped, body)
+    version = vault.backend.put(key, text)
+    _reindex(vault, key, text, version)
+    return f"Appended to: {key}"
 
 
 def move(vault: Vault, src: str, dst: str) -> str:
-    vault.backend.move(src, dst)
-    text, version = _read(vault, dst)
-    vault.index.remove(src)
-    _reindex(vault, dst, text, version)
-    return f"Moved: {src} -> {dst}"
+    source, target = note_key(src), note_key(dst)
+    text, _ = _read(vault, source)
+    frontmatter, _ = parse(text)
+    _require_valid(vault, frontmatter, target, "would not be a valid note")
+    vault.backend.move(source, target)
+    text, version = _read(vault, target)
+    vault.index.remove(source)
+    _reindex(vault, target, text, version)
+    return f"Moved: {source} -> {target}"
 
 
 def delete(vault: Vault, path: str) -> str:
-    vault.backend.delete(path)
-    vault.index.remove(path)
-    return f"Deleted: {path}"
+    key = note_key(path)
+    vault.backend.delete(key)
+    vault.index.remove(key)
+    return f"Deleted: {key}"
 
 
 def _free_key(vault: Vault, folder: str, basename: str) -> str:
@@ -125,6 +159,7 @@ def _free_key(vault: Vault, folder: str, basename: str) -> str:
 
 
 def set_status(vault: Vault, path: str, status: str, priority: str | None = None, source: str | None = None) -> str:
+    path = note_key(path)
     text, _ = _read(vault, path)
     frontmatter, body = parse(text)
     frontmatter["status"] = status
@@ -133,9 +168,7 @@ def set_status(vault: Vault, path: str, status: str, priority: str | None = None
     if source:
         frontmatter["source"] = source
     stamped = _with_dates(frontmatter)
-    problems = validate(stamped, path, vault.schema)
-    if problems:
-        raise ValidationError("\n".join([f"{path} would not be a valid note:", *[f"- {p}" for p in problems]]))
+    _require_valid(vault, stamped, path, "would not be a valid note")
     out = dump(stamped, body)
     _reindex(vault, path, out, vault.backend.put(path, out))
     return f"{path}: status {status}" + (f", priority {priority}" if priority else "")
@@ -162,6 +195,7 @@ def park_stale(vault: Vault) -> list[str]:
 
 
 def close(vault: Vault, path: str, merged_into: str | None = None, status: str | None = None) -> str:
+    path = note_key(path)
     text, _ = _read(vault, path)
     frontmatter, body = parse(text)
     if merged_into:
@@ -169,12 +203,17 @@ def close(vault: Vault, path: str, merged_into: str | None = None, status: str |
         frontmatter["superseded_by"] = f"[[{stem_of(merged_into)}]]"
     else:
         frontmatter["status"] = status or "complete"
-    frontmatter["updated"] = today()
-    destination = _free_key(vault, vault.schema.archive_folder, path.rsplit("/", 1)[-1])
-    version = vault.backend.put(destination, dump(frontmatter, body))
-    vault.backend.delete(path)
-    vault.index.remove(path)
-    _reindex(vault, destination, dump(frontmatter, body), version)
+    archive = vault.schema.archive_folder
+    archived = path.split("/", 1)[0] == archive
+    destination = path if archived else _free_key(vault, archive, path.rsplit("/", 1)[-1])
+    stamped = _with_dates(frontmatter)
+    _require_valid(vault, stamped, destination, "cannot be closed into a valid note")
+    out = dump(stamped, body)
+    version = vault.backend.put(destination, out)
+    if not archived:
+        vault.backend.delete(path)
+        vault.index.remove(path)
+    _reindex(vault, destination, out, version)
     return destination
 
 
@@ -186,8 +225,8 @@ def _area_link(area: str | None, repo: str) -> str:
 def _new_log(repo: str, area: str | None) -> tuple[dict, str]:
     frontmatter = {
         "title": f"Logg — {repo}",
-        "date": today(),
-        "updated": today(),
+        "date": stamp(),
+        "updated": stamp(),
         "tags": ["log", repo],
         "status": "active",
         "kind": "log",
@@ -204,7 +243,7 @@ def log_append(
     area: str | None = None,
     branch: str | None = None,
 ) -> str:
-    key = vault.schema.log_key(repo)
+    key = note_key(vault.schema.log_key(repo))
     try:
         existing, _ = _read(vault, key)
         frontmatter, body = parse(existing)
@@ -212,7 +251,7 @@ def log_append(
         frontmatter, body = _new_log(repo, area)
     if area:
         frontmatter["area"] = _area_link(area, repo)
-    frontmatter["updated"] = today()
+    frontmatter["updated"] = stamp()
     entry = vault.schema.log_entry_format.format(
         date=today(),
         line=line,
@@ -240,6 +279,10 @@ def slugify(title: str) -> str:
     return head.rsplit("-", 1)[0] if "-" in head else head[:SLUG_MAX]
 
 
+def _title_slug(title: str) -> str:
+    return slugify(title) or re.sub(r"[\W_]+", "-", title.casefold()).strip("-")[:SLUG_MAX] or "untitled"
+
+
 def _area_stem(area: str) -> str:
     return stem_of(area.strip().strip("[]").split("|")[0].strip())
 
@@ -256,13 +299,13 @@ def backlog_add(
     if not area_stem:
         raise ValueError("area is required: the stem of the system note, or [[stem]]")
     family = area_stem.split("-")[0]
-    slug = slugify(title)
+    slug = _title_slug(title)
     stem = slug if slug == family or slug.startswith(f"{family}-") else f"{family}-{slug}"
-    key = _free_key(vault, vault.schema.task_folders[0], stem)
+    key = note_key(_free_key(vault, vault.schema.task_folders[0], stem))
     frontmatter: dict = {
         "title": title,
-        "date": today(),
-        "updated": today(),
+        "date": stamp(),
+        "updated": stamp(),
         "tags": [family],
         "status": BACKLOG_STATUS,
         "kind": "task",
@@ -432,7 +475,7 @@ def _log_tail(vault: Vault, repo: str | None) -> list[str]:
     if not repo:
         return []
     try:
-        text, _ = _read(vault, vault.schema.log_key(repo))
+        text, _ = _read(vault, note_key(vault.schema.log_key(repo)))
     except Exception:
         return []
     lines = [line for line in text.splitlines() if line.strip()]
@@ -587,8 +630,8 @@ def lint(vault: Vault) -> Findings:
 def lint_note_text(findings: Findings) -> str:
     frontmatter = {
         "title": f"Lint {today()}",
-        "date": today(),
-        "updated": today(),
+        "date": stamp(),
+        "updated": stamp(),
         "tags": ["log"],
         "status": "complete",
         "kind": "log",
@@ -603,7 +646,7 @@ def changelog_notes(vault: Vault, period: str) -> list[Note]:
 
 def log_lines(vault: Vault, repo: str, period: str) -> list[str]:
     try:
-        text, _ = _read(vault, vault.schema.log_key(repo))
+        text, _ = _read(vault, note_key(vault.schema.log_key(repo)))
     except Exception:
         return []
     return [line for line in text.splitlines() if line.lstrip().startswith(f"- [{period}")]

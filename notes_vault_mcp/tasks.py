@@ -73,8 +73,8 @@ def open_task(vault: Vault, name: str, cwd: str, branch: str | None = None) -> d
     key = free_key(vault, vault.schema.task_folders[0], task_stem(where.repo, name))
     frontmatter: dict = {
         "title": name.strip(),
-        "date": notes.today(),
-        "updated": notes.today(),
+        "date": notes.stamp(),
+        "updated": notes.stamp(),
         "tags": task_tags(vault, where.repo, where.area),
         "status": "active",
         "kind": "task",
@@ -91,6 +91,7 @@ def open_task(vault: Vault, name: str, cwd: str, branch: str | None = None) -> d
 
 
 def claim_task(vault: Vault, path: str, cwd: str) -> dict:
+    path = notes.note_key(path)
     if folder_of(path) not in vault.schema.task_folders:
         raise ValueError(f"{path} is not in a task folder ({', '.join(vault.schema.task_folders)})")
     text, _ = vault.backend.get(path)
@@ -124,7 +125,7 @@ def missing_sections(vault: Vault, path: str, need: list[str]) -> list[str]:
     unknown = [key for key in need if key not in sections]
     if unknown:
         raise ValueError(f"unknown section {', '.join(unknown)}; the schema names {', '.join(sections)}")
-    text, _ = vault.backend.get(path)
+    text, _ = vault.backend.get(notes.note_key(path))
     _, body = parse(text)
     filled = filled_headings(body)
     return [key for key in need if not filled.get(sections[key].strip().casefold(), False)]

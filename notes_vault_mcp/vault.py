@@ -4,7 +4,8 @@ import hashlib
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Protocol
 
@@ -60,6 +61,8 @@ class NoSubject(VaultError):
 class VaultResolver(Protocol):
     def current(self) -> Vault: ...
 
+    def using(self) -> AbstractContextManager[Vault]: ...
+
     @property
     def instruction_schema(self) -> Schema: ...
 
@@ -72,6 +75,10 @@ class SingleVault:
 
     def current(self) -> Vault:
         return self.vault
+
+    @contextmanager
+    def using(self) -> Iterator[Vault]:
+        yield self.vault
 
     @property
     def instruction_schema(self) -> Schema:
@@ -104,25 +111,51 @@ class SubjectVaults:
         self.idle_seconds = idle_seconds
         self.clock = clock
         self._open: dict[str, tuple[Vault, float]] = {}
+        self._in_use: dict[str, int] = {}
         self._lock = threading.Lock()
         self._instruction_schema: Schema | None = None
 
-    def current(self) -> Vault:
+    def _current_subject(self) -> str:
         from mcp.server.auth.middleware.auth_context import get_access_token
 
         token = get_access_token()
         if token is None or not token.subject:
             raise NoSubject("no authenticated subject on this request")
-        return self.for_subject(token.subject)
+        return token.subject
 
-    def for_subject(self, subject: str) -> Vault:
+    def current(self) -> Vault:
+        return self.for_subject(self._current_subject())
+
+    @contextmanager
+    def using(self) -> Iterator[Vault]:
+        with self.using_subject(self._current_subject()) as vault:
+            yield vault
+
+    @contextmanager
+    def using_subject(self, subject: str) -> Iterator[Vault]:
         key = subject_key(subject)
         with self._lock:
-            self._evict()
-            opened = self._open.get(key)
-            vault = opened[0] if opened else self._open_vault(key)
-            self._open[key] = (vault, self.clock())
-            return vault
+            vault = self._touch(key)
+            self._in_use[key] = self._in_use.get(key, 0) + 1
+        try:
+            yield vault
+        finally:
+            with self._lock:
+                self._in_use[key] -= 1
+                if not self._in_use[key]:
+                    del self._in_use[key]
+                self._open[key] = (vault, self.clock())
+
+    def for_subject(self, subject: str) -> Vault:
+        with self._lock:
+            return self._touch(subject_key(subject))
+
+    def _touch(self, key: str) -> Vault:
+        self._evict()
+        opened = self._open.get(key)
+        vault = opened[0] if opened else self._open_vault(key)
+        self._open[key] = (vault, self.clock())
+        return vault
 
     def _open_vault(self, key: str) -> Vault:
         backend, identifier = make_subject_backend(key, self.prefix)
@@ -133,7 +166,7 @@ class SubjectVaults:
     def _evict(self) -> None:
         now = self.clock()
         for key, (vault, last_used) in list(self._open.items()):
-            if now - last_used > self.idle_seconds:
+            if now - last_used > self.idle_seconds and not self._in_use.get(key):
                 vault.close()
                 del self._open[key]
 

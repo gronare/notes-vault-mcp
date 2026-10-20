@@ -19,4 +19,13 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --python ${{ matrix.python-version }}
       - run: uv run ruff check .
+      - run: uv run ruff format --check .
       - run: uv run pytest -q
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uv export --frozen --all-groups --no-emit-project --format requirements-txt > "$RUNNER_TEMP/requirements.txt"
+      - run: uvx pip-audit --disable-pip --require-hashes -r "$RUNNER_TEMP/requirements.txt"

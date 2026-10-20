@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections.abc import Callable
 from importlib import metadata
@@ -61,19 +60,19 @@ def command_hook(args: argparse.Namespace) -> int:
     return 0
 
 
-PERIOD_RE = re.compile(r"^\d{4}(-\d{2})?$")
-
-
 def command_changelog(args: argparse.Namespace) -> int:
     vault = open_vault()
     vault.index.sync()
     if args.all:
-        period = args.period or (args.repo if args.repo and PERIOD_RE.match(args.repo) else None)
+        period = args.period or (args.repo if args.repo and changelog.PERIOD_RE.match(args.repo) else None)
         for key in changelog.write_all(vault, periods=[period] if period else None):
             print(f"wrote {key}")
         return 0
     if not args.repo or not args.period:
         print("changelog needs <repo> <period>, or --all", file=sys.stderr)
+        return 2
+    if not changelog.PERIOD_RE.match(args.period):
+        print(f"notes-vault-mcp: period {args.period!r} is not YYYY or YYYY-MM", file=sys.stderr)
         return 2
     repo_path = Path(args.repo_path).expanduser() if args.repo_path else None
     if args.write:
@@ -85,6 +84,12 @@ def command_changelog(args: argparse.Namespace) -> int:
 
 
 def command_lint(args: argparse.Namespace) -> int:
+    if args.write:
+        try:
+            notes.note_key(args.write)
+        except notes.InvalidKey as exc:
+            print(one_line(exc), file=sys.stderr)
+            return 2
     vault = open_vault()
     vault.index.sync(force=True)
     parked = notes.park_stale(vault) if args.park_stale else []
@@ -93,7 +98,8 @@ def command_lint(args: argparse.Namespace) -> int:
         findings.add("parked", f"{key}: status backlog, untouched for more than {vault.schema.stale_after_days} days")
     print(findings.render())
     if args.write:
-        vault.backend.put(args.write, notes.lint_note_text(findings))
+        text = notes.lint_note_text(findings)
+        notes._reindex(vault, args.write, text, vault.backend.put(args.write, text))
         print(f"wrote {args.write}", file=sys.stderr)
     return 0
 
@@ -142,7 +148,8 @@ def package_version() -> str:
 
 
 def one_line(exc: Exception) -> str:
-    message = f"no such note: {exc}" if isinstance(exc, NotFound) else " ".join(str(exc).split())
+    missing = isinstance(exc, NotFound) and not isinstance(exc, notes.InvalidKey)
+    message = f"no such note: {exc}" if missing else " ".join(str(exc).split())
     return message if message.startswith("notes-vault-mcp:") else f"notes-vault-mcp: {message}"
 
 

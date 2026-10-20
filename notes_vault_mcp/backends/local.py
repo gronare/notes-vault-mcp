@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import os
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from notes_vault_mcp.backends import Entry, NotFound, VersionConflict, is_vault_key
+from notes_vault_mcp.backends import Entry, NotFound, VaultError, VersionConflict, is_vault_key
 
 
 def _version(stat: os.stat_result) -> str:
@@ -23,8 +22,8 @@ def _entry(key: str, stat: os.stat_result, size: int | None = None) -> Entry:
 
 class LocalBackend:
     def __init__(self, root: Path) -> None:
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
+        Path(root).mkdir(parents=True, exist_ok=True)
+        self.root = Path(root).resolve()
 
     def _path(self, key: str) -> Path:
         path = (self.root / key).resolve()
@@ -43,9 +42,25 @@ class LocalBackend:
             entries.append(_entry(key, path.stat()))
         return sorted(entries, key=lambda entry: entry.key)
 
+    def _under(self, prefix: str) -> list[Path]:
+        if not prefix:
+            return list(self.root.rglob("*"))
+        parent, _, name = prefix.rpartition("/")
+        base = self.root / parent if parent else self.root
+        self._path(parent or ".")
+        if not base.is_dir():
+            return []
+        paths = [base] if parent and not name else []
+        for child in base.iterdir():
+            if child.name.startswith(name):
+                paths.append(child)
+                if child.is_dir() and not child.is_symlink():
+                    paths.extend(child.rglob("*"))
+        return paths
+
     def list_all(self, prefix: str = "") -> list[Entry]:
         entries: list[Entry] = []
-        for path in self.root.rglob("*"):
+        for path in self._under(prefix):
             key = path.relative_to(self.root).as_posix()
             if path.is_dir():
                 key += "/"
@@ -88,8 +103,13 @@ class LocalBackend:
 
     def delete(self, key: str) -> None:
         path = self._path(key)
+        if path == self.root:
+            raise VaultError("refusing to delete the vault root")
         if path.is_dir():
-            shutil.rmtree(path)
+            try:
+                path.rmdir()
+            except OSError as exc:
+                raise VaultError(f"refusing to delete a folder that is not empty: {key}") from exc
             return
         try:
             path.unlink()
@@ -101,5 +121,7 @@ class LocalBackend:
         target = self._path(dst)
         if not source.exists():
             raise NotFound(src)
+        if source.is_dir():
+            raise VaultError(f"refusing to move a folder: {src}")
         target.parent.mkdir(parents=True, exist_ok=True)
         source.replace(target)

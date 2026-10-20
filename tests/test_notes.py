@@ -100,9 +100,10 @@ def test_append_adds_a_line_and_bumps_updated(vault: Vault):
     assert frontmatter["updated"] == date.today()
 
 
-def test_append_creates_a_missing_note(vault: Vault):
-    notes.append(vault, "Projects/helt-ny.md", "Första raden.")
-    assert vault.backend.get("Projects/helt-ny.md")[0].strip() == "Första raden."
+def test_append_refuses_a_missing_note(vault: Vault, vault_dir):
+    with pytest.raises(NotFound, match="write_file creates one"):
+        notes.append(vault, "Projects/helt-ny.md", "Första raden.")
+    assert not (vault_dir / "Projects" / "helt-ny.md").exists()
 
 
 def test_move_reindexes_under_the_new_key(vault: Vault):

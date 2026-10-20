@@ -8,6 +8,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from notes_vault_mcp.config import private_dir
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS personal_tokens (
     token_hash TEXT PRIMARY KEY,
@@ -28,8 +30,7 @@ class PersonalTokens:
     # One live token per subject, for clients that cannot do OAuth (Obsidian's Remotely Save over WebDAV).
     # Only the hash is stored; issuing a new token revokes the previous one.
     def __init__(self, directory: Path) -> None:
-        directory.mkdir(parents=True, exist_ok=True)
-        self.path = directory / "personal.sqlite"
+        self.path = private_dir(directory) / "personal.sqlite"
         with self.connect() as connection:
             connection.executescript(SCHEMA)
 

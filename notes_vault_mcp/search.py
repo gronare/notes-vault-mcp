@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 import shlex
+import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from notes_vault_mcp.index import Index, Note
 from notes_vault_mcp.schema import Schema
@@ -15,6 +16,27 @@ PREFIX_MIN_LENGTH = 4
 SNIPPET_LENGTH = 160
 STATUS_FACTORS = {"active": 1.0, "draft": 0.9, "complete": 0.7, "superseded": 0.3}
 DAY_SECONDS = 86400.0
+CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+class QueryError(ValueError):
+    pass
+
+
+def since_day(since: str | None) -> str | None:
+    if not since:
+        return None
+    try:
+        return date.fromisoformat(since.strip()).isoformat()
+    except ValueError as exc:
+        raise QueryError(f"since must be an ISO date (YYYY-MM-DD), not {since!r}") from exc
+
+
+def _fts(index: Index, sql: str, expression: str) -> list[sqlite3.Row]:
+    try:
+        return index.db.execute(sql, (expression,)).fetchall()
+    except sqlite3.OperationalError as exc:
+        raise QueryError(f"the search index refused the query: {exc}") from exc
 
 
 @dataclass
@@ -41,6 +63,7 @@ class SearchResult:
 
 
 def terms_of(query: str) -> list[tuple[str, bool]]:
+    query = CONTROL_RE.sub(" ", query)
     try:
         tokens = shlex.split(query)
     except ValueError:
@@ -193,7 +216,7 @@ def _fts_query(index: Index, schema: Schema, expression: str) -> list[Row]:
                snippet(notes_fts, 3, '', '', '…', 20) AS snip
         FROM notes_fts WHERE notes_fts MATCH ?
     """
-    rows = index.db.execute(sql, (expression,)).fetchall()
+    rows = _fts(index, sql, expression)
     found: list[Row] = []
     for row in rows:
         note = index.note(row["key"])
@@ -205,7 +228,7 @@ def _fts_query(index: Index, schema: Schema, expression: str) -> list[Row]:
 
 
 def _matching_keys(index: Index, expression: str) -> set[str]:
-    rows = index.db.execute("SELECT key FROM notes_fts WHERE notes_fts MATCH ?", (expression,)).fetchall()
+    rows = _fts(index, "SELECT key FROM notes_fts WHERE notes_fts MATCH ?", expression)
     return {row["key"] for row in rows}
 
 
@@ -262,6 +285,7 @@ def search(
     path_prefix: str | None = None,
     since: str | None = None,
 ) -> SearchResult:
+    since = since_day(since)
     candidates, partial = _candidates(index, schema, query)
     pinned = _stem_rows(index, query, candidates)
     pinned_keys = {row.note.key for row in pinned}

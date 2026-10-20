@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -8,15 +9,22 @@ from notes_vault_mcp.backends import NotFound
 from notes_vault_mcp.frontmatter import dump, parse
 from notes_vault_mcp.git import git, is_checkout, repo_name
 from notes_vault_mcp.index import Note, stem_of
-from notes_vault_mcp.notes import _reindex, changelog_notes, log_lines, today
+from notes_vault_mcp.notes import _reindex, changelog_notes, log_lines, note_key, stamp
 from notes_vault_mcp.vault import Vault
 
 GENERATED_START = "<!-- changelog:generated -->"
 GENERATED_END = "<!-- /changelog:generated -->"
 PREVIOUS_MONTH_GRACE_DAYS = 7
+PERIOD_RE = re.compile(r"^\d{4}(-(0[1-9]|1[0-2]))?$")
+
+
+class BadPeriod(ValueError):
+    pass
 
 
 def period_bounds(period: str) -> tuple[str, str]:
+    if not PERIOD_RE.match(period):
+        raise BadPeriod(f"period {period!r} is not YYYY or YYYY-MM")
     if len(period) == 4:
         year = int(period)
         return f"{year}-01-01", f"{year + 1}-01-01"
@@ -97,8 +105,8 @@ def _log_area(vault: Vault, repo: str) -> str:
 def _new_page(vault: Vault, repo: str, period: str) -> dict:
     return {
         "title": f"{repo} — {period}",
-        "date": period_bounds(period)[0],
-        "updated": today(),
+        "date": date.fromisoformat(period_bounds(period)[0]),
+        "updated": stamp(),
         "tags": ["log", repo],
         "status": "active",
         "kind": "log",
@@ -111,7 +119,8 @@ def period_over(period: str, on: date | None = None) -> bool:
 
 
 def write_page(vault: Vault, repo: str, period: str, repo_path: Path | None) -> bool:
-    key = vault.schema.period_key(repo, period)
+    period_bounds(period)
+    key = note_key(vault.schema.period_key(repo, period))
     try:
         text, _ = vault.backend.get(key)
         frontmatter, body = parse(text)
@@ -121,7 +130,7 @@ def write_page(vault: Vault, repo: str, period: str, repo_path: Path | None) -> 
     new_body = splice(body, generated_block(vault, repo, period, repo_path))
     if existed and new_body == body:
         return False
-    frontmatter["updated"] = today()
+    frontmatter["updated"] = stamp()
     frontmatter["status"] = "complete" if period_over(period) else "active"
     out = dump(frontmatter, new_body)
     _reindex(vault, key, out, vault.backend.put(key, out))

@@ -32,10 +32,6 @@ from notes_vault_mcp.auth.http import BearerToken
 
 
 @pytest.mark.anyio
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a non-ASCII Authorization header raises TypeError in compare_digest instead of a 401",
-)
 async def test_a_non_ascii_authorization_header_is_refused_with_401():
     inner = _Unreached()
     status = await _collect(BearerToken(inner, "s3cret"), [(b"authorization", b"Bearer s\xffcret")])
@@ -195,10 +191,6 @@ async def http(client: httpx2.AsyncClient):  # noqa: F811
 
 
 @pytest.mark.anyio
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: the login page sends no framing or caching protection (clickjacking, cached password form)",
-)
 async def test_the_login_page_cannot_be_framed_or_cached(http: httpx2.AsyncClient):
     registration = await register(http)
     _, request_id = await start_login(http, registration)
@@ -275,16 +267,18 @@ async def test_a_login_request_is_consumed_by_one_approval(http: httpx2.AsyncCli
     assert again.status_code == 400 and "expired" in again.text
 
 
-def test_the_lockout_is_keyed_by_caller_and_forgets_after_the_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_the_lockout_guards_the_one_owner_password_and_forgets_after_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     provider = BuiltinProvider(AuthConfig(mode="builtin", public_url="http://localhost", auth_dir=tmp_path))
     moment = [1000.0]
     monkeypatch.setattr("notes_vault_mcp.auth.builtin.time.monotonic", lambda: moment[0])
-    for _ in range(5):
-        provider.record_failure("10.0.0.1")
-    assert provider.locked_out("10.0.0.1") is True
-    assert provider.locked_out("10.0.0.2") is False
+    for _ in range(50):
+        provider.record_failure()
+    assert provider.locked_out() is True
+    assert len(provider.failures) <= 5
     moment[0] += 61
-    assert provider.locked_out("10.0.0.1") is False
+    assert provider.locked_out() is False
 
 
 # --- oidc -----------------------------------------------------------------------------------------------------
@@ -305,11 +299,6 @@ async def test_an_hmac_signed_oidc_token_is_refused(idp: Idp):
 
 
 @pytest.mark.anyio
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: pyjwt 2.13 accepts non-base64url bytes in the signature (PYSEC-2026-4147), "
-    "so one token has many hashes",
-)
 async def test_a_token_with_a_padded_signature_is_refused(idp: Idp):
     token = idp.token(groups=["vault-writers"])
     assert await idp.verifier().verify_token(token + "!!!!") is None

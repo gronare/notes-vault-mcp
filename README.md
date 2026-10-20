@@ -183,12 +183,12 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 | `obsidian_access` | write | `--auth forwarded` only. Mints the personal token Obsidian's Remotely Save plugin uses over WebDAV and shows it once; a new token revokes the previous one. |
 | `lint` | moderate | Reads every note and reports drift. |
 | `init` | write | Sets a vault up: writes `.vault/schema.yml` and the Obsidian Bases views into the root and keeps what exists; `force` overwrites. The plugin's `/vault:init` calls it. |
-| `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. Files that are not notes (`.vault/schema.yml`, `.base` views) are stored verbatim. |
-| `append_file` | write | Appends and bumps `updated`. Creates the note when missing. |
+| `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. Only `.md` notes outside dot-folders are written; the schema and the `.base` views come from `init`, and `read_file` still serves them. |
+| `append_file` | write | Appends and bumps `updated`; the note must exist and still satisfy the schema. |
 | `set_status` | write | Changes a note's status without rewriting it: `backlog` with a priority parks it, `active` picks it up again. |
 | `close` | write | Sets status complete (or superseded, with `superseded_by`, when `merged_into` is given) and moves the note into the archive. |
 | `log_append` | write | One dated line in the repo log, with the commits it produced. Creates the log when missing. |
-| `move_file` | write | Moves or renames. |
+| `move_file` | write | Moves or renames a note; it must satisfy the schema at the destination. |
 | `delete_file` | write | Deletes for good. Prefer `close`. |
 
 `search` filters: `folder`, `status`, `tag`, `kind`, `area`, `path_prefix`, `since`,
@@ -381,7 +381,7 @@ One server instance serves one vault.
 | `VAULT_PUBLIC_URL` | oidc, builtin | Required. The https address clients reach, path included when the server is not at the root. No default: the server refuses to start without it, and refuses anything that is not `https://` (or `http://localhost` for a local trial). |
 | `VAULT_AUTH_DIR` | builtin | Where `auth.sqlite` lives — the owner's password hash, the registered clients, the hashed tokens. Default `~/.cache/notes-vault-mcp/auth`. |
 | `VAULT_OIDC_ISSUER` | oidc | Required. The provider's issuer URL. |
-| `VAULT_OIDC_AUDIENCE` | oidc | The client id the provider puts in `aud`. Checked when set, ignored when empty. |
+| `VAULT_OIDC_AUDIENCE` | oidc | The client id the provider puts in `aud`. Required; a token without it, or for another audience, is refused. |
 | `VAULT_OIDC_READ_GROUP` | oidc | Group granting `vault:read`. Default `vault`. |
 | `VAULT_OIDC_WRITE_GROUP` | oidc | Group granting `vault:read` and `vault:write`. Default `vault-writers`. |
 | `VAULT_OIDC_SCOPES` | oidc | Scopes the resource metadata advertises, so the client asks the provider for scopes it knows. Default `openid profile email groups`. When the access token carries no `groups`, the server asks the provider's userinfo endpoint. |

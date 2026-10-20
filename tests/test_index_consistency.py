@@ -6,10 +6,9 @@ from pathlib import Path
 import pytest
 from mcp.client import Client
 from test_notes import VALID, body_of
-from test_server import text_of
 
 from notes_vault_mcp import notes
-from notes_vault_mcp.frontmatter import validate
+from notes_vault_mcp.backends import NotFound
 from notes_vault_mcp.index import Index
 from notes_vault_mcp.server import build_server
 from notes_vault_mcp.vault import Vault
@@ -31,8 +30,6 @@ def no_sync(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_append_updates_the_index_without_a_sync(vault: Vault, no_sync):
     notes.append(vault, "Areas/orchard.md", "Ny rad.")
     assert vault.index.note("Areas/orchard.md").updated == notes.today()
-    notes.append(vault, "Projects/brand-new.md", "Rad.")
-    assert vault.index.note("Projects/brand-new.md") is not None
 
 
 def test_close_updates_the_index_without_a_sync(vault: Vault, no_sync):
@@ -63,11 +60,6 @@ def test_delete_and_move_leave_no_stale_rows(vault: Vault, no_sync):
     assert not {"Areas/orchard.md", "Areas/moved.md"} & (keys | fts | links)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: one SQLite connection is shared by the worker threads the MCP SDK runs sync tools in; "
-    "concurrent writes raise DatabaseError",
-)
 def test_concurrent_writes_from_tool_threads_all_land_in_the_index(vault: Vault):
     def write(number: int) -> str:
         key = f"Projects/parallel-{number}.md"
@@ -102,56 +94,46 @@ def test_a_body_without_frontmatter_is_refused_as_a_note(vault: Vault):
         notes.write(vault, "Projects/bare.md", "Just text.\n")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: append_file creates a missing note without frontmatter, which the schema would refuse",
-)
-def test_append_cannot_create_a_note_the_schema_refuses(vault: Vault):
-    notes.append(vault, "Projects/helt-ny.md", "Första raden.")
-    frontmatter, _ = body_of(vault, "Projects/helt-ny.md")
-    assert validate(frontmatter, "Projects/helt-ny.md", vault.schema) == []
+def test_append_cannot_create_a_note_the_schema_refuses(vault: Vault, vault_dir: Path):
+    with pytest.raises(NotFound):
+        notes.append(vault, "Projects/helt-ny.md", "Första raden.")
+    assert not (vault_dir / "Projects" / "helt-ny.md").exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: move_file skips validation, so a note can land in a folder whose rules it breaks",
-)
+def test_append_refuses_to_extend_a_note_the_schema_refuses(vault: Vault, vault_dir: Path):
+    before = (vault_dir / "Resources" / "no-frontmatter.md").read_text(encoding="utf-8")
+    with pytest.raises(notes.ValidationError):
+        notes.append(vault, "Resources/no-frontmatter.md", "Rad.")
+    assert (vault_dir / "Resources" / "no-frontmatter.md").read_text(encoding="utf-8") == before
+
+
 def test_move_validates_the_note_against_the_destination_folder(vault: Vault):
     with pytest.raises(notes.ValidationError):
         notes.move(vault, "Areas/orchard.md", "Projects/orchard-task.md")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: close writes an archive note from a frontmatter-less file with only status and updated",
-)
-def test_close_of_a_note_without_frontmatter_yields_a_valid_archive_note(vault: Vault):
-    destination = notes.close(vault, "Resources/no-frontmatter.md")
-    frontmatter, _ = body_of(vault, destination)
-    assert validate(frontmatter, destination, vault.schema) == []
+def test_close_of_a_note_without_frontmatter_is_refused_rather_than_archived_invalid(vault: Vault, vault_dir: Path):
+    with pytest.raises(notes.ValidationError):
+        notes.close(vault, "Resources/no-frontmatter.md")
+    assert (vault_dir / "Resources" / "no-frontmatter.md").is_file()
+    assert not (vault_dir / "Archive" / "no-frontmatter.md").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="bug: closing a note that already sits in the archive copies it to a -2 name")
 def test_close_of_an_archived_note_keeps_its_key(vault: Vault):
     assert notes.close(vault, "Archive/old-plan.md") == "Archive/old-plan.md"
     assert vault.index.note("Archive/old-plan-2.md") is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a title with no latin letters slugifies to nothing and the key ends in a dash",
-)
 def test_backlog_add_with_a_non_latin_title_gets_a_usable_key(vault: Vault):
     key = notes.backlog_add(vault, "日本語のタイトル", "orchard", "En rad")
     assert not key.endswith("-.md")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="bug: a note under .vault/ skips validation on write yet sync indexes it as a note",
-)
-def test_a_note_under_the_vault_folder_is_either_validated_or_never_indexed(vault: Vault):
-    notes.write(vault, ".vault/sneaky.md", "no frontmatter\n")
+def test_a_note_under_the_vault_folder_is_neither_written_nor_indexed(vault: Vault, vault_dir: Path):
+    with pytest.raises(notes.InvalidKey):
+        notes.write(vault, ".vault/sneaky.md", "no frontmatter\n")
+    (vault_dir / ".vault").mkdir(exist_ok=True)
+    (vault_dir / ".vault" / "sneaky.md").write_text("no frontmatter\n", encoding="utf-8")
     vault.index.sync(force=True)
     assert vault.index.note(".vault/sneaky.md") is None
 
@@ -174,7 +156,8 @@ def test_set_status_with_an_unknown_priority_is_refused(vault: Vault):
 async def test_rewriting_the_schema_through_write_file_does_not_loosen_the_running_server(vault: Vault):
     loose = "version: 1\nfrontmatter:\n  required: []\n  area_required_in: []\n"
     async with Client(build_server(vault)) as client:
-        await text_of(client, "write_file", {"path": ".vault/schema.yml", "content": loose})
+        refused = await client.call_tool("write_file", {"path": ".vault/schema.yml", "content": loose})
+        assert refused.is_error
         result = await client.call_tool("write_file", {"path": "Projects/utan-area.md", "content": NO_AREA})
     assert result.is_error
 
@@ -196,3 +179,20 @@ async def test_a_tool_error_never_carries_the_vault_root(vault: Vault, vault_dir
     for result in (missing, climbing):
         assert result.is_error
         assert str(vault_dir) not in "".join(block.text for block in result.content)
+
+
+def test_an_idle_vault_is_never_closed_while_a_request_is_using_it(storage: Path, tmp_path: Path):
+    from notes_vault_mcp.vault import SubjectVaults
+
+    now = [0.0]
+    vaults = SubjectVaults(cache=tmp_path / "cache", idle_seconds=10, clock=lambda: now[0])
+    with vaults.using_subject("alice") as alice:
+        alice.index.sync(force=True)
+        now[0] = 100.0
+        vaults.for_subject("bob")
+        assert "alice" in vaults.open_subjects
+        assert alice.index.all_notes() is not None
+    now[0] = 200.0
+    vaults.for_subject("bob")
+    assert "alice" not in vaults.open_subjects
+    vaults.close()

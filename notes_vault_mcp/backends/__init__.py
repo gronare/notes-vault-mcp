@@ -6,7 +6,6 @@ from typing import Protocol, runtime_checkable
 
 SCHEMA_KEY = ".vault/schema.yml"
 NOTE_SUFFIXES = (".md", ".base")
-SKIPPED_SEGMENTS = frozenset({".obsidian", ".trash"})
 
 
 class VaultError(Exception):
@@ -56,11 +55,10 @@ class VaultBackend(Protocol):
 
 
 def is_vault_key(key: str) -> bool:
-    segments = key.split("/")
-    if SKIPPED_SEGMENTS.intersection(segments):
-        return False
     if key == SCHEMA_KEY:
         return True
+    if any(segment.startswith(".") for segment in key.split("/")):
+        return False
     return key.endswith(NOTE_SUFFIXES)
 
 

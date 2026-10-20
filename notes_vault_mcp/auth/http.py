@@ -17,6 +17,7 @@ def auth_settings(auth: AuthConfig) -> AuthSettings:
     return AuthSettings(
         issuer_url=auth.issuer,
         resource_server_url=auth.resource_url,
+        validate_token_resource=False,
         required_scopes=[READ_SCOPE] if builtin else None,
         client_registration_options=ClientRegistrationOptions(
             enabled=builtin, valid_scopes=list(SCOPES), default_scopes=[READ_SCOPE]
@@ -52,7 +53,7 @@ class BearerToken:
     def _authorized(self, scope: dict) -> bool:
         for name, value in scope.get("headers", []):
             if name.lower() == b"authorization":
-                return secrets.compare_digest(value.decode("latin-1"), f"Bearer {self.token}")
+                return secrets.compare_digest(value, f"Bearer {self.token}".encode())
         return False
 
 
