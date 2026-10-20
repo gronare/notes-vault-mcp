@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 PLUGIN_ENV_PREFIX = "CLAUDE_PLUGIN_OPTION_"
@@ -71,26 +73,64 @@ PLUGIN_OPTIONS = {
 }
 
 
+def claude_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()
+
+
 def claude_settings_path() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser() / "settings.json"
+    return claude_dir() / "settings.json"
+
+
+def read_json(text: str) -> dict:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def claude_credentials() -> dict:
+    """Claude Code's .credentials.json, or on macOS the default config's keychain item."""
+    try:
+        return read_json((claude_dir() / ".credentials.json").read_text(encoding="utf-8"))
+    except OSError:
+        pass
+    if sys.platform != "darwin" or os.environ.get("CLAUDE_CONFIG_DIR"):
+        return {}
+    try:
+        found = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    return read_json(found.stdout) if found.returncode == 0 else {}
+
+
+def storage_values(options: object) -> dict[str, str]:
+    return {
+        PLUGIN_OPTIONS[name]: value.strip()
+        for name, value in (options.items() if isinstance(options, dict) else [])
+        if name in PLUGIN_OPTIONS and isinstance(value, str) and value.strip()
+    }
 
 
 def plugin_options(settings_path: Path | None = None) -> dict[str, str]:
-    """The vault plugin's user config as Claude Code saved it, keyed by the variable each option feeds."""
+    """The vault plugin's options keyed by the variable each feeds; sensitive ones from pluginSecrets."""
     try:
-        data = json.loads((settings_path or claude_settings_path()).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    configs = data.get("pluginConfigs") if isinstance(data, dict) else None
-    for plugin, config in (configs or {}).items():
+        data = read_json((settings_path or claude_settings_path()).read_text(encoding="utf-8"))
+    except OSError:
+        data = {}
+    configs = data.get("pluginConfigs") or {}
+    for plugin, config in configs.items() if isinstance(configs, dict) else []:
         if plugin.split("@", 1)[0] != PLUGIN_NAME or not isinstance(config, dict):
             continue
-        options = config.get("options") or {}
-        found = {
-            PLUGIN_OPTIONS[name]: value.strip()
-            for name, value in options.items()
-            if name in PLUGIN_OPTIONS and isinstance(value, str) and value.strip()
-        }
+        found = storage_values(config.get("options"))
+        if "VAULT_PATH" not in found and not {"S3_ACCESS_KEY", "S3_SECRET_KEY"} <= found.keys():
+            found = storage_values((claude_credentials().get("pluginSecrets") or {}).get(plugin)) | found
         if found:
             return found
     return {}

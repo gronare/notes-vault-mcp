@@ -244,3 +244,25 @@ def test_the_environment_wins_over_the_plugin_config(isolated: Path, configured:
     write_settings(isolated, {"vault_path": str(tmp_path / "elsewhere")})
     assert adopt_plugin_config() == "env"
     assert os.environ["VAULT_PATH"] == str(configured)
+
+
+def test_sensitive_options_come_from_claude_codes_credentials(isolated: Path):
+    write_settings(isolated, {"s3_endpoint": "https://s3.test", "s3_bucket": "b", "s3_access_key": "ak"})
+    secrets = {"pluginSecrets": {"vault@gronare": {"s3_secret_key": "sk"}}}
+    (isolated / ".credentials.json").write_text(json.dumps(secrets), encoding="utf-8")
+    assert plugin_options() == {
+        "S3_ENDPOINT": "https://s3.test",
+        "S3_BUCKET": "b",
+        "S3_ACCESS_KEY": "ak",
+        "S3_SECRET_KEY": "sk",
+    }
+
+
+def test_a_secret_in_settings_wins_over_the_credentials(isolated: Path):
+    write_settings(
+        isolated, {"s3_endpoint": "e", "s3_bucket": "b", "s3_access_key": "ak", "s3_secret_key": "from-settings"}
+    )
+    (isolated / ".credentials.json").write_text(
+        json.dumps({"pluginSecrets": {"vault@gronare": {"s3_secret_key": "x"}}}), encoding="utf-8"
+    )
+    assert plugin_options()["S3_SECRET_KEY"] == "from-settings"
