@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
+from collections.abc import Callable
+from importlib import metadata
 from pathlib import Path
 
-from notes_vault_mcp import changelog, hooks, notes, provision
+from notes_vault_mcp import __version__, changelog, hooks, notes, provision, tasks
 from notes_vault_mcp.auth import auth_config
-from notes_vault_mcp.config import ConfigError
+from notes_vault_mcp.backends import NotFound
+from notes_vault_mcp.config import ConfigError, adopt_plugin_config, local_root, s3_settings
 from notes_vault_mcp.search import render, search
 from notes_vault_mcp.server import run_http, run_stdio
-from notes_vault_mcp.vault import open_vault
+from notes_vault_mcp.vault import Vault, open_vault
 
 template = provision.template
 
@@ -127,6 +131,95 @@ def command_search(args: argparse.Namespace) -> int:
     return 0
 
 
+WRITE_PROBE_KEY = ".vault/write-probe"
+
+
+def package_version() -> str:
+    try:
+        return metadata.version("notes-vault-mcp")
+    except metadata.PackageNotFoundError:
+        return __version__
+
+
+def one_line(exc: Exception) -> str:
+    message = f"no such note: {exc}" if isinstance(exc, NotFound) else " ".join(str(exc).split())
+    return message if message.startswith("notes-vault-mcp:") else f"notes-vault-mcp: {message}"
+
+
+def json_command(action: Callable[[argparse.Namespace, Vault], dict]) -> Callable[[argparse.Namespace], int]:
+    def run(args: argparse.Namespace) -> int:
+        try:
+            adopt_plugin_config()
+            vault = open_vault()
+            try:
+                vault.index.sync()
+                result = action(args, vault)
+            finally:
+                vault.close()
+        except Exception as exc:
+            print(one_line(exc), file=sys.stderr)
+            return 1
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+
+    return run
+
+
+def task_open(args: argparse.Namespace, vault: Vault) -> dict:
+    if args.note:
+        return tasks.claim_task(vault, args.note, args.cwd)
+    return tasks.open_task(vault, args.name or "", args.cwd, branch=args.branch)
+
+
+def task_check(args: argparse.Namespace, vault: Vault) -> dict:
+    need = [key.strip() for key in args.need.split(",") if key.strip()]
+    return {"missing": tasks.missing_sections(vault, args.path, need)}
+
+
+def task_close(args: argparse.Namespace, vault: Vault) -> dict:
+    return {"path": notes.close(vault, args.path)}
+
+
+def task_backlog(args: argparse.Namespace, vault: Vault) -> dict:
+    notes.set_status(vault, args.path, notes.BACKLOG_STATUS, priority=args.priority)
+    return {"path": args.path}
+
+
+def log_append(args: argparse.Namespace, vault: Vault) -> dict:
+    return tasks.append_log(vault, args.cwd, args.line, commits=tuple(args.commit or ()), branch=args.branch)
+
+
+def log_path(args: argparse.Namespace, vault: Vault) -> dict:
+    return {"path": vault.schema.log_key(args.repo)}
+
+
+def is_writable(vault: Vault) -> bool:
+    try:
+        vault.backend.put(WRITE_PROBE_KEY, "")
+        vault.backend.delete(WRITE_PROBE_KEY)
+    except Exception:
+        return False
+    return True
+
+
+def command_status(args: argparse.Namespace) -> int:
+    adopt_plugin_config()
+    backend = "local" if local_root() is not None else "s3" if s3_settings() is not None else None
+    writable: bool | None = None if not args.probe else False
+    if backend is not None and args.probe:
+        try:
+            vault = open_vault()
+            try:
+                writable = is_writable(vault)
+            finally:
+                vault.close()
+        except Exception:
+            writable = False
+    status = {"configured": backend is not None, "version": package_version(), "backend": backend, "writable": writable}
+    print(json.dumps(status))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="notes-vault-mcp",
@@ -200,6 +293,48 @@ def build_parser() -> argparse.ArgumentParser:
     find.add_argument("query")
     find.add_argument("--limit", type=int, default=15)
     find.set_defaults(func=command_search)
+
+    task = sub.add_parser("task", help="the task note of one piece of work, for tools that drive agents (JSON out)")
+    task_sub = task.add_subparsers(dest="task_command", required=True)
+    opening = task_sub.add_parser("open", help="create a task note for the repo, or claim a backlog note with --note")
+    opening.add_argument("--name", help="the task's name; the placeholder title and the stem")
+    opening.add_argument("--cwd", required=True, help="the worktree or checkout the work happens in")
+    opening.add_argument("--branch", help="the branch; read from --cwd when omitted")
+    opening.add_argument("--note", metavar="VAULT_PATH", help="claim this existing task note instead of creating one")
+    opening.set_defaults(func=json_command(task_open))
+    check = task_sub.add_parser("check", help="list the sections of a task note that are still empty")
+    check.add_argument("path")
+    check.add_argument(
+        "--need",
+        default=",".join(tasks.DEFAULT_NEED),
+        help="comma-separated keys among problem, solution, decisions, tests, scope",
+    )
+    check.set_defaults(func=json_command(task_check))
+    closing = task_sub.add_parser("close", help="set status complete and move the note to the archive")
+    closing.add_argument("path")
+    closing.set_defaults(func=json_command(task_close))
+    parking = task_sub.add_parser("backlog", help="put the note back in the backlog")
+    parking.add_argument("path")
+    parking.add_argument("--priority", default="medium", help="urgent, high, medium or low")
+    parking.set_defaults(func=json_command(task_backlog))
+
+    repo_log = sub.add_parser("log", help="the repo log, for tools that drive agents (JSON out)")
+    log_sub = repo_log.add_subparsers(dest="log_command", required=True)
+    appending = log_sub.add_parser("append", help="append a line to the log of the repo --cwd belongs to")
+    appending.add_argument("--cwd", required=True, help="a worktree or checkout; the log is the main checkout's")
+    appending.add_argument("--branch", help="the branch the commits were made on; read from --cwd when omitted")
+    appending.add_argument("--line", required=True)
+    appending.add_argument("--commit", action="append", help="a commit sha; repeat for several")
+    appending.set_defaults(func=json_command(log_append))
+    locating = log_sub.add_parser("path", help="the vault path of a repo's log, from the schema")
+    locating.add_argument("--repo", required=True)
+    locating.set_defaults(func=json_command(log_path))
+
+    status = sub.add_parser("status", help="whether a vault is configured (JSON out, never fails, never writes)")
+    status.add_argument(
+        "--probe", action="store_true", help="also write and delete .vault/write-probe to measure writable"
+    )
+    status.set_defaults(func=command_status)
 
     return parser
 

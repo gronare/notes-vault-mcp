@@ -31,6 +31,10 @@ log:
   file_format: "{repo}-log.md"
   period_format: "{repo}-{period}.md"
   entry_format: "- [{date}] {line} | branch: {branch} | commits: {commits} | {area}"
+task:
+  sections:
+    en: { problem: Problem, solution: Solution, decisions: Decisions, tests: Test decisions, scope: Out of scope }
+    sv: { problem: Problem, solution: Lösning, decisions: Beslut, tests: Testbeslut, scope: Utanför ramen }
 stale_after_days: 30
 search:
   default_limit: 15

@@ -161,6 +161,12 @@ class Schema:
         return tuple(dict.fromkeys([self.language, *self.other_languages]))
 
     @property
+    def task_sections(self) -> dict[str, str]:
+        by_language = (self.data.get("task") or {}).get("sections") or {}
+        chosen = by_language.get(self.language) or by_language.get("en") or {}
+        return {str(key): str(heading) for key, heading in chosen.items() if heading}
+
+    @property
     def stale_after_days(self) -> int:
         return int(self.data.get("stale_after_days", 30))
 

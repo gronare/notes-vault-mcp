@@ -269,6 +269,60 @@ current repo apart from the open tasks. Picking an item up is setting its status
 finishing it is `close`. Lint leaves backlog notes alone however old they get, and flags a
 `complete` note that was never closed. `init` writes `Backlog.base` next to the other Obsidian bases.
 
+## Task and log commands
+
+For a tool that drives coding agents and records the facts itself at fixed points (start, push, done,
+reset) instead of relying on the agent to call the MCP tools. Each prints one JSON object on stdout and
+exits 0; a failure exits non-zero with one line on stderr. Every write goes through the same path as
+the MCP tools: schema validation, the `updated` stamp and the index.
+
+```sh
+notes-vault-mcp task open --name "Fix login" --cwd ~/wt/wt1.myapp [--branch fix-login]
+# {"path": "Projects/myapp-fix-login.md", "created": true, "repo": "myapp", "area": "myapp"}
+notes-vault-mcp task open --note Projects/myapp-idea.md --cwd ~/wt/wt1.myapp
+# {"path": "Projects/myapp-idea.md", "created": false, "repo": "myapp", "area": "myapp"}
+notes-vault-mcp task check Projects/myapp-fix-login.md --need problem,solution,decisions
+# {"missing": ["solution", "decisions"]}
+notes-vault-mcp task close Projects/myapp-fix-login.md        # {"path": "Archive/myapp-fix-login.md"}
+notes-vault-mcp task backlog Projects/myapp-fix-login.md --priority medium   # {"path": "Projects/…"}
+notes-vault-mcp log append --cwd ~/wt/wt1.myapp --line "Login fixed" --commit abc1234 --commit def5678
+# {"path": "Log/myapp-log.md"}
+notes-vault-mcp log path --repo myapp                         # {"path": "Log/myapp-log.md"}
+notes-vault-mcp status
+# {"configured": true, "version": "0.5.1", "backend": "s3", "writable": null}
+notes-vault-mcp status --probe
+# {"configured": true, "version": "0.5.1", "backend": "s3", "writable": true}
+```
+
+The repo is the main checkout's name, also from a worktree, and the area is the system note the
+session-start hook would load for that directory, falling back to the repo name (`"area": null` in the
+output when no note matched). `task open` writes a task note with the task name as a placeholder title,
+status `active`, `path` set to the main checkout, `source: branch <name>`, and the section headings
+with empty bodies; the stem is the repo plus the task name, made unique across the whole vault.
+`--note` claims an existing task note instead: status `active`, nothing else changed. `--branch`
+defaults to the branch checked out in `--cwd`.
+
+`task check` takes the canonical keys `problem`, `solution`, `decisions`, `tests` and `scope`. A
+section is filled when it has any text under its heading, before the next heading of the same or a
+higher level. The headings are a schema setting, per language, picked by the vault's `language`:
+
+```yaml
+task:
+  sections:
+    en: { problem: Problem, solution: Solution, decisions: Decisions, tests: Test decisions, scope: Out of scope }
+    sv: { problem: Problem, solution: Lösning, decisions: Beslut, tests: Testbeslut, scope: Utanför ramen }
+```
+
+`status` never fails: with no vault configured it prints `"configured": false, "backend": null` and
+exits 0. It is read-only and leaves `writable` null; `--probe` measures it by writing and deleting
+`.vault/write-probe`.
+
+These commands read the storage settings from the environment first. When the environment names no
+vault, they take the Claude Code plugin's saved user config instead: `pluginConfigs["vault@<marketplace>"].options`
+in `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude/settings.json`), mapping `vault_path`,
+`s3_endpoint`, `s3_bucket`, `s3_access_key`, `s3_secret_key`, `s3_prefix` and `s3_region` to their
+variables. A value Claude Code keeps outside that file has to come from the environment.
+
 ## HTTP transport
 
 ```sh
