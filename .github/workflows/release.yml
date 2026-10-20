@@ -9,6 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: The tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          package=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          server=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' notes_vault_mcp/server.py)
+          if [ "$package" != "$tag" ] || [ "$server" != "$tag" ]; then echo "::error::pyproject.toml says $package, server.py says $server, the tag says $tag"; exit 1; fi
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: uv run ruff check .
@@ -108,3 +114,14 @@ jobs:
           git add plugins/vault/.mcp.json plugins/vault/hooks/hooks.json plugins/vault/.claude-plugin/plugin.json
           git commit -m "vault ${PLUGIN}: the server and the hooks pin notes-vault-mcp==${VERSION}"
           git push origin HEAD:main
+
+  release:
+    needs: [pypi, ghcr]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: GitHub Release with notes from the commits since the last tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "notes-vault-mcp ${GITHUB_REF_NAME#v}"
