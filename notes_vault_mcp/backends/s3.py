@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-from notes_vault_mcp.backends import Entry, NotFound, VersionConflict, is_vault_key
+from notes_vault_mcp.backends import MUST_NOT_EXIST, Entry, NotFound, VersionConflict, is_vault_key
 
 MISSING_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
+CONFLICT_CODES = frozenset({"PreconditionFailed", "412", "ConditionalRequestConflict", "409"})
+UNSUPPORTED_CODES = frozenset({"NotImplemented", "501"})
+log = logging.getLogger(__name__)
+MARKDOWN = "text/markdown; charset=utf-8"
 
 
 def _etag(raw: str | None) -> str:
@@ -26,6 +31,7 @@ class S3Backend:
         region: str = "us-east-1",
     ) -> None:
         self.bucket = bucket
+        self.conditional_puts = True
         self.prefix = prefix.strip("/") + "/" if prefix.strip("/") else ""
         self.client = boto3.client(
             "s3",
@@ -96,18 +102,37 @@ class S3Backend:
         return _etag(response.get("ETag"))
 
     def put(self, key: str, text: str, expected_version: str | None = None) -> str:
-        if expected_version is not None:
-            current = self.current_version(key)
-            if current != expected_version:
-                raise VersionConflict(f"{key} changed since it was read (etag {current}, expected {expected_version})")
-        return self.put_bytes(key, text.encode("utf-8"), "text/markdown; charset=utf-8")
+        data = text.encode("utf-8")
+        if expected_version is None:
+            return self.put_bytes(key, data, MARKDOWN)
+        if self.conditional_puts:
+            condition = (
+                {"IfNoneMatch": "*"} if expected_version == MUST_NOT_EXIST else {"IfMatch": f'"{expected_version}"'}
+            )
+            try:
+                return self.put_bytes(key, data, MARKDOWN, condition)
+            except ClientError as exc:
+                code = exc.response["Error"]["Code"]
+                if code in CONFLICT_CODES:
+                    raise VersionConflict(f"{key} changed since it was read (expected {expected_version})") from exc
+                if code not in UNSUPPORTED_CODES:
+                    raise
+                self.conditional_puts = False
+                log.warning(
+                    "notes-vault-mcp: this S3 server refuses conditional PUTs; checking the etag before each write"
+                )
+        current = self.current_version(key)
+        if (current is not None) if expected_version == MUST_NOT_EXIST else (current != expected_version):
+            raise VersionConflict(f"{key} changed since it was read (etag {current}, expected {expected_version})")
+        return self.put_bytes(key, data, MARKDOWN)
 
-    def put_bytes(self, key: str, data: bytes, content_type: str | None = None) -> str:
+    def put_bytes(self, key: str, data: bytes, content_type: str | None = None, condition: dict | None = None) -> str:
         response = self.client.put_object(
             Bucket=self.bucket,
             Key=self._object_key(key),
             Body=data,
             ContentType=content_type or mimetypes.guess_type(key)[0] or "application/octet-stream",
+            **(condition or {}),
         )
         return _etag(response.get("ETag"))
 

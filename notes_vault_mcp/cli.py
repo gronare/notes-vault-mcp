@@ -192,6 +192,16 @@ def task_backlog(args: argparse.Namespace, vault: Vault) -> dict:
     return {"path": args.path}
 
 
+def task_claim(args: argparse.Namespace, vault: Vault) -> dict:
+    return tasks.claim_note(vault, args.path, args.machine, args.task, repo=args.repo or "", force=args.force)
+
+
+def task_release(args: argparse.Namespace, vault: Vault) -> dict:
+    if args.path is None:
+        return tasks.release_claims_of(vault, args.machine or "", args.task or "")
+    return tasks.release_note(vault, args.path, machine=args.machine)
+
+
 def log_append(args: argparse.Namespace, vault: Vault) -> dict:
     return tasks.append_log(vault, args.cwd, args.line, commits=tuple(args.commit or ()), branch=args.branch)
 
@@ -324,6 +334,23 @@ def build_parser() -> argparse.ArgumentParser:
     parking.add_argument("path")
     parking.add_argument("--priority", default="medium", help="urgent, high, medium or low")
     parking.set_defaults(func=json_command(task_backlog))
+    claiming = task_sub.add_parser(
+        "claim", help="write which machine and task work on the note (frontmatter key kelpie), unless another holds it"
+    )
+    claiming.add_argument("path")
+    claiming.add_argument("--machine", required=True, help="the machine the work runs on")
+    claiming.add_argument("--task", required=True, help="the task working on the note")
+    claiming.add_argument("--repo", help="the repo the task works in")
+    claiming.add_argument("--force", action="store_true", help="take the note over from another machine")
+    claiming.set_defaults(func=json_command(task_claim))
+    releasing = task_sub.add_parser(
+        "release",
+        help="clear the note's claim (frontmatter key kelpie), or without a path every claim of --machine --task",
+    )
+    releasing.add_argument("path", nargs="?")
+    releasing.add_argument("--machine", help="clear it only when this machine holds it")
+    releasing.add_argument("--task", help="without a path: the task whose claims to clear, wherever its notes moved")
+    releasing.set_defaults(func=json_command(task_release))
 
     repo_log = sub.add_parser("log", help="the repo log, for tools that drive agents (JSON out)")
     log_sub = repo_log.add_subparsers(dest="log_command", required=True)

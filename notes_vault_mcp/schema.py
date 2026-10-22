@@ -9,6 +9,8 @@ import yaml
 
 from notes_vault_mcp.backends import SCHEMA_KEY, VaultBackend
 
+CLAIM_KEY = "kelpie"
+CLAIM_STALE_DAYS = 14
 DEFAULT_LOG_ENTRY_FORMAT = "- [{date}] {line} | branch: {branch} | commits: {commits} | {area}"
 
 
@@ -265,6 +267,12 @@ def instructions(schema: Schema) -> str:
     priorities = ", ".join(schema.priority_values)
     priority_line = f"\n- priority, on a backlog note, is one of: {priorities}" if priorities else ""
     area_folders = ", ".join(schema.area_required_in)
+    claim_line = (
+        f"\n- {CLAIM_KEY}, on a task note, says which machine and task work on it: kelpie writes and clears it, "
+        "write_file keeps it as stored, so never edit it; a note held by another machine is not yours to start"
+        if CLAIM_KEY in schema.optional_fields
+        else ""
+    )
     tags = ", ".join(schema.tag_vocabulary)
     vocabulary = f"Tags come from this vocabulary: {tags}." if tags else "Tags are free-form."
     strictness = " Tags outside it are rejected." if schema.tags_strict else " It is a guide, not a gate."
@@ -282,7 +290,7 @@ Frontmatter contract for every note:
 - optional: {optional}
 - status is one of: {statuses}
 - kind is one of:{kinds}{priority_line}
-- area is a wikilink to the system note, shaped [[stem]], and is required in: {area_folders}
+- area is a wikilink to the system note, shaped [[stem]], and is required in: {area_folders}{claim_line}
 {vocabulary}{strictness}
 
 Workflow:

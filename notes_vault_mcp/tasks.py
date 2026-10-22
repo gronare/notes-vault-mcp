@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from notes_vault_mcp import notes
-from notes_vault_mcp.frontmatter import dump, folder_of, parse
+from notes_vault_mcp.backends import MUST_NOT_EXIST, VersionConflict
+from notes_vault_mcp.frontmatter import CLAIM_KEY, claim_fields, dump, folder_of, parse
 from notes_vault_mcp.git import current_branch, in_main_checkout, main_checkout, repo_name
 from notes_vault_mcp.index import Note, stem_of
 from notes_vault_mcp.vault import Vault
@@ -13,6 +16,7 @@ from notes_vault_mcp.vault import Vault
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.*?)[ \t#]*$")
 FENCE_RE = re.compile(r"^[ \t]*(```|~~~)")
 DEFAULT_NEED = ("problem", "solution", "decisions")
+CLAIM_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -86,7 +90,7 @@ def open_task(vault: Vault, name: str, cwd: str, branch: str | None = None) -> d
     on_branch = branch or current_branch(cwd)
     if on_branch:
         frontmatter["source"] = f"branch {on_branch}"
-    notes.write(vault, key, dump(frontmatter, section_skeleton(vault)))
+    notes.write(vault, key, dump(frontmatter, section_skeleton(vault)), expected_etag=MUST_NOT_EXIST)
     return {"path": key, "created": True, "repo": where.repo, "area": area_stem}
 
 
@@ -99,6 +103,74 @@ def claim_task(vault: Vault, path: str, cwd: str) -> dict:
     notes.set_status(vault, path, "active")
     area = notes._area_stem(str(frontmatter.get("area") or "")) or None
     return {"path": path, "created": False, "repo": repo_name(cwd), "area": area}
+
+
+def claim_stamp() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _task_note(vault: Vault, path: str) -> str:
+    key = notes.note_key(path)
+    if folder_of(key) not in vault.schema.task_folders:
+        raise ValueError(f"{key} is not in a task folder ({', '.join(vault.schema.task_folders)})")
+    return key
+
+
+def claim_note(vault: Vault, path: str, machine: str, task: str, repo: str = "", force: bool = False) -> dict:
+    key = _task_note(vault, path)
+    machine, task = machine.strip(), task.strip()
+    if not machine or not task:
+        raise ValueError("task claim needs --machine and --task")
+    for _ in range(CLAIM_ATTEMPTS):
+        text, version = vault.backend.get(key)
+        frontmatter, body = parse(text)
+        held = claim_fields(frontmatter.get(CLAIM_KEY))
+        elsewhere = held is not None and held["machine"] != machine
+        if elsewhere and not force:
+            return {"path": key, "claimed": False, "claim": held}
+        since = held["since"] if held is not None and not elsewhere and held["task"] == task else claim_stamp()
+        claim = {"machine": machine, "task": task, "repo": repo.strip(), "since": since}
+        frontmatter[CLAIM_KEY] = claim
+        try:
+            notes.put_frontmatter(vault, key, frontmatter, body, version)
+        except VersionConflict:
+            continue
+        return {"path": key, "claimed": True, "claim": claim, "replaced": held if elsewhere else None}
+    raise VersionConflict(f"{key} kept changing while kelpie claimed it; try again")
+
+
+def release_note(vault: Vault, path: str, machine: str | None = None) -> dict:
+    key = _task_note(vault, path)
+    for _ in range(CLAIM_ATTEMPTS):
+        text, version = vault.backend.get(key)
+        frontmatter, body = parse(text)
+        if CLAIM_KEY not in frontmatter:
+            return {"path": key, "released": True, "claim": None}
+        held = claim_fields(frontmatter.get(CLAIM_KEY))
+        if held is not None and machine and held["machine"] != machine.strip():
+            return {"path": key, "released": False, "claim": held}
+        del frontmatter[CLAIM_KEY]
+        try:
+            notes.put_frontmatter(vault, key, frontmatter, body, version)
+        except VersionConflict:
+            continue
+        return {"path": key, "released": True, "claim": None}
+    raise VersionConflict(f"{key} kept changing while kelpie released it; try again")
+
+
+def release_claims_of(vault: Vault, machine: str, task: str) -> dict:
+    machine, task = machine.strip(), task.strip()
+    if not machine or not task:
+        raise ValueError("task release without a path needs --machine and --task")
+    vault.index.sync(force=True)
+    held = [
+        note.key
+        for note in vault.index.all_notes()
+        if note.claim and (claim := json.loads(note.claim))["machine"] == machine and claim["task"] == task
+    ]
+    for key in held:
+        release_note(vault, key, machine=machine)
+    return {"paths": held, "released": True}
 
 
 def filled_headings(body: str) -> dict[str, bool]:

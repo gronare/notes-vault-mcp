@@ -105,7 +105,8 @@ def build_server(
         description=(
             "WRITE — validates the frontmatter against the vault schema and refuses the write if it "
             "does not hold. Stamps `updated` with today and fills `date` when missing. Pass "
-            "expected_etag from read_file to make the write conditional."
+            'expected_etag from read_file to make the write conditional, or "*" to create a note '
+            "that must not exist yet."
         ),
     )
     def write_file(path: str, content: str, expected_etag: str | None = None) -> str:

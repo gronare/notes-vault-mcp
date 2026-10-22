@@ -4,9 +4,10 @@ from pathlib import Path
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
-from notes_vault_mcp.backends import NotFound, VersionConflict
+from notes_vault_mcp.backends import MUST_NOT_EXIST, NotFound, VersionConflict
 from notes_vault_mcp.backends.local import LocalBackend
 from notes_vault_mcp.backends.s3 import S3Backend
 
@@ -195,3 +196,51 @@ def test_local_list_all_walks_only_what_the_prefix_names(vault_dir: Path):
     assert not any(key.startswith("Projects") for key in under | named)
     assert backend.list_all("Nope/") == []
     assert {entry.key for entry in backend.list_all("")} >= under | named
+
+
+def test_s3_conditional_put_sends_if_match_and_never_heads_first(s3_backend: S3Backend, monkeypatch):
+    _, version = s3_backend.get("Areas/orchard.md")
+    monkeypatch.setattr(s3_backend, "current_version", lambda key: pytest.fail("a conditional put needs no HEAD"))
+    s3_backend.put("Areas/orchard.md", "mine", expected_version=version)
+    with pytest.raises(VersionConflict):
+        s3_backend.put("Areas/orchard.md", "again", expected_version=version)
+    assert s3_backend.get("Areas/orchard.md")[0] == "mine"
+
+
+def test_s3_create_only_put_refuses_an_existing_key(s3_backend: S3Backend):
+    with pytest.raises(VersionConflict):
+        s3_backend.put("Areas/orchard.md", "clobber", expected_version=MUST_NOT_EXIST)
+    s3_backend.put("Areas/new.md", "fresh", expected_version=MUST_NOT_EXIST)
+    assert s3_backend.get("Areas/new.md")[0] == "fresh"
+
+
+def test_s3_without_conditional_puts_falls_back_to_checking_the_etag_and_says_so_once(
+    s3_backend: S3Backend, monkeypatch, caplog
+):
+    original = s3_backend.client.put_object
+
+    def refusing(**kwargs):
+        if "IfMatch" in kwargs or "IfNoneMatch" in kwargs:
+            raise ClientError({"Error": {"Code": "NotImplemented", "Message": "no"}}, "PutObject")
+        return original(**kwargs)
+
+    monkeypatch.setattr(s3_backend.client, "put_object", refusing)
+    _, version = s3_backend.get("Areas/orchard.md")
+    with caplog.at_level("WARNING"):
+        version = s3_backend.put("Areas/orchard.md", "mine", expected_version=version)
+        s3_backend.put("Areas/orchard.md", "again", expected_version=version)
+        with pytest.raises(VersionConflict):
+            s3_backend.put("Areas/orchard.md", "stale", expected_version=version)
+        with pytest.raises(VersionConflict):
+            s3_backend.put("Areas/orchard.md", "clobber", expected_version=MUST_NOT_EXIST)
+    assert s3_backend.get("Areas/orchard.md")[0] == "again"
+    assert [record.message for record in caplog.records].count(
+        "notes-vault-mcp: this S3 server refuses conditional PUTs; checking the etag before each write"
+    ) == 1
+
+
+def test_local_create_only_put_refuses_an_existing_key(vault_dir: Path):
+    backend = LocalBackend(vault_dir)
+    with pytest.raises(VersionConflict):
+        backend.put("Areas/orchard.md", "clobber", expected_version=MUST_NOT_EXIST)
+    backend.put("Areas/brand-new.md", "fresh", expected_version=MUST_NOT_EXIST)

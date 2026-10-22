@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from notes_vault_mcp.backends import Entry, VaultBackend
-from notes_vault_mcp.frontmatter import FrontmatterError, folder_of, parse, tags_of
+from notes_vault_mcp.frontmatter import CLAIM_KEY, FrontmatterError, claim_fields, folder_of, parse, tags_of
 from notes_vault_mcp.stemming import algorithms_of, stemmed
 
 SYNC_THROTTLE_SECONDS = 20
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS notes (
   key TEXT PRIMARY KEY, version TEXT, mtime REAL, folder TEXT, stem TEXT,
   title TEXT, summary TEXT, status TEXT, kind TEXT, area TEXT,
   tags TEXT, paths TEXT, date TEXT, updated TEXT, superseded_by TEXT,
-  valid INT, error TEXT, size INT, priority TEXT, source TEXT
+  valid INT, error TEXT, size INT, priority TEXT, source TEXT, claim TEXT
 );
 CREATE INDEX IF NOT EXISTS notes_folder ON notes(folder);
 CREATE INDEX IF NOT EXISTS notes_stem ON notes(stem);
@@ -51,9 +51,9 @@ CREATE TABLE IF NOT EXISTS repos (repo TEXT PRIMARY KEY, root TEXT, seen_at TEXT
 
 NOTE_COLUMNS = (
     "key, version, mtime, folder, stem, title, summary, status, kind, area, "
-    "tags, paths, date, updated, superseded_by, valid, error, size, priority, source"
+    "tags, paths, date, updated, superseded_by, valid, error, size, priority, source, claim"
 )
-ADDED_COLUMNS = ("priority", "source")
+ADDED_COLUMNS = ("priority", "source", "claim")
 FTS_COLUMNS = {"stem", "stemmed"}
 
 
@@ -79,6 +79,7 @@ class Note:
     size: int = 0
     priority: str = ""
     source: str = ""
+    claim: str = ""
 
 
 def stem_of(key: str) -> str:
@@ -149,6 +150,8 @@ def note_from_text(key: str, text: str, version: str, mtime: float, size: int) -
     note.superseded_by = _as_text(frontmatter.get("superseded_by"))
     note.priority = _as_text(frontmatter.get("priority"))
     note.source = _as_text(frontmatter.get("source"))
+    claim = claim_fields(frontmatter.get(CLAIM_KEY))
+    note.claim = json.dumps(claim, ensure_ascii=False) if claim else ""
     return note, body
 
 
@@ -174,6 +177,7 @@ def _row_to_note(row: sqlite3.Row) -> Note:
         size=row["size"] or 0,
         priority=row["priority"] or "",
         source=row["source"] or "",
+        claim=row["claim"] or "",
     )
 
 
@@ -301,7 +305,7 @@ class Index:
 
     def _insert(self, db: sqlite3.Connection, note: Note, body: str, text: str) -> None:
         db.execute(
-            f"INSERT INTO notes ({NOTE_COLUMNS}) VALUES ({', '.join('?' * 20)})",
+            f"INSERT INTO notes ({NOTE_COLUMNS}) VALUES ({', '.join('?' * 21)})",
             (
                 note.key,
                 note.version,
@@ -323,6 +327,7 @@ class Index:
                 note.size,
                 note.priority,
                 note.source,
+                note.claim,
             ),
         )
         db.execute(

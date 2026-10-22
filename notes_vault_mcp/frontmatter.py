@@ -5,12 +5,13 @@ from typing import Any
 
 import yaml
 
-from notes_vault_mcp.schema import Schema
+from notes_vault_mcp.schema import CLAIM_KEY, Schema
 
 FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 AREA_RE = re.compile(r"^\[\[[^\]|]+(\|[^\]]+)?\]\]$")
 MAX_FRONTMATTER_CHARS = 64 * 1024
 MAX_ALIASES = 8
+CLAIM_FIELDS = ("machine", "task", "repo", "since")
 
 
 class FrontmatterError(Exception):
@@ -119,6 +120,15 @@ def _missing(frontmatter: dict[str, Any], field: str) -> bool:
     return value is None or value == "" or value == []
 
 
+def claim_fields(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    fields = {name: "" if value.get(name) is None else str(value.get(name)).strip() for name in CLAIM_FIELDS}
+    if not all(fields[name] for name in ("machine", "task", "since")):
+        return None
+    return fields
+
+
 def validate(frontmatter: dict[str, Any], key: str, schema: Schema) -> list[str]:
     problems: list[str] = []
     for field in schema.required_fields:
@@ -140,6 +150,10 @@ def validate(frontmatter: dict[str, Any], key: str, schema: Schema) -> list[str]
     priority = frontmatter.get("priority")
     if priority is not None and schema.priority_values and str(priority) not in schema.priority_values:
         problems.append(f"priority '{priority}' is not one of: {', '.join(schema.priority_values)}")
+
+    claim = frontmatter.get(CLAIM_KEY)
+    if claim is not None and claim_fields(claim) is None:
+        problems.append(f"{CLAIM_KEY} must be a mapping with machine, task and since (and optionally repo)")
 
     folder = folder_of(key)
     if folder in schema.area_required_in:

@@ -4,7 +4,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from notes_vault_mcp.backends import Entry, NotFound, VaultError, VersionConflict, is_vault_key
+from notes_vault_mcp.backends import MUST_NOT_EXIST, Entry, NotFound, VaultError, VersionConflict, is_vault_key
 
 
 def _version(stat: os.stat_result) -> str:
@@ -88,7 +88,7 @@ class LocalBackend:
     def put(self, key: str, text: str, expected_version: str | None = None) -> str:
         if expected_version is not None:
             current = self.current_version(key)
-            if current != expected_version:
+            if (current is not None) if expected_version == MUST_NOT_EXIST else (current != expected_version):
                 raise VersionConflict(f"{key} changed since it was read (etag {current}, expected {expected_version})")
         return self.put_bytes(key, text.encode("utf-8"))
 

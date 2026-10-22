@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -9,8 +10,9 @@ from datetime import date
 from pathlib import Path
 
 from notes_vault_mcp.backends import SCHEMA_KEY, NotFound
-from notes_vault_mcp.frontmatter import dump, parse, validate
+from notes_vault_mcp.frontmatter import CLAIM_KEY, FrontmatterError, claim_fields, dump, parse, validate
 from notes_vault_mcp.index import Note, expand_home, stem_of
+from notes_vault_mcp.schema import CLAIM_STALE_DAYS
 from notes_vault_mcp.search import age_days, humanize_age
 from notes_vault_mcp.vault import Vault
 
@@ -101,10 +103,25 @@ def _require_valid(vault: Vault, frontmatter: dict, key: str, verdict: str) -> N
         raise ValidationError("\n".join([f"{key} {verdict}:", *[f"- {p}" for p in problems]]))
 
 
+def _stored_claim(vault: Vault, key: str) -> dict[str, str] | None:
+    try:
+        text, _ = _read(vault, key)
+        return claim_fields(parse(text)[0].get(CLAIM_KEY))
+    except (NotFound, FrontmatterError):
+        return None
+
+
+def _with_claim(frontmatter: dict, claim: dict[str, str] | None) -> dict:
+    kept = {key: value for key, value in frontmatter.items() if key != CLAIM_KEY}
+    if claim is not None:
+        kept[CLAIM_KEY] = claim
+    return kept
+
+
 def write(vault: Vault, path: str, content: str, expected_etag: str | None = None) -> str:
     key = note_key(path)
     frontmatter, body = parse(content)
-    stamped = _with_dates(frontmatter)
+    stamped = _with_dates(_with_claim(frontmatter, _stored_claim(vault, key)))
     _require_valid(vault, stamped, key, "is not a valid note")
     text = dump(stamped, body)
     version = vault.backend.put(key, text, expected_version=expected_etag)
@@ -163,6 +180,8 @@ def set_status(vault: Vault, path: str, status: str, priority: str | None = None
     text, _ = _read(vault, path)
     frontmatter, body = parse(text)
     frontmatter["status"] = status
+    if status == BACKLOG_STATUS:
+        frontmatter.pop(CLAIM_KEY, None)
     if priority:
         frontmatter["priority"] = priority
     if source:
@@ -174,6 +193,29 @@ def set_status(vault: Vault, path: str, status: str, priority: str | None = None
     return f"{path}: status {status}" + (f", priority {priority}" if priority else "")
 
 
+def put_frontmatter(vault: Vault, path: str, frontmatter: dict, body: str, expected_version: str) -> str:
+    stamped = _with_dates(frontmatter)
+    _require_valid(vault, stamped, path, "would not be a valid note")
+    out = dump(stamped, body)
+    version = vault.backend.put(path, out, expected_version=expected_version)
+    _reindex(vault, path, out, version)
+    return version
+
+
+def _day(text: str) -> date | None:
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def claim_is_fresh(note: Note, today: date | None = None) -> bool:
+    if not note.claim:
+        return False
+    days = [day for day in (_day(json.loads(note.claim)["since"]), _day(note.updated)) if day is not None]
+    return bool(days) and ((today or date.today()) - max(days)).days <= CLAIM_STALE_DAYS
+
+
 def park_stale(vault: Vault) -> list[str]:
     now = time.time()
     task_folders = set(vault.schema.task_folders)
@@ -181,7 +223,7 @@ def park_stale(vault: Vault) -> list[str]:
     for note in vault.index.all_notes():
         if not note.valid or note.folder not in task_folders or note.status not in OPEN_STATUSES:
             continue
-        if age_days(note, now) <= vault.schema.stale_after_days:
+        if age_days(note, now) <= vault.schema.stale_after_days or claim_is_fresh(note):
             continue
         set_status(
             vault,
@@ -203,6 +245,7 @@ def close(vault: Vault, path: str, merged_into: str | None = None, status: str |
         frontmatter["superseded_by"] = f"[[{stem_of(merged_into)}]]"
     else:
         frontmatter["status"] = status or "complete"
+    frontmatter.pop(CLAIM_KEY, None)
     archive = vault.schema.archive_folder
     archived = path.split("/", 1)[0] == archive
     destination = path if archived else _free_key(vault, archive, path.rsplit("/", 1)[-1])
@@ -434,8 +477,15 @@ class ContextBundle:
         return "\n\n".join(blocks)
 
 
+def _claim_text(note: Note) -> str:
+    claim = json.loads(note.claim) if note.claim else None
+    if not claim:
+        return ""
+    return f" | worked on at {claim['machine']} · {claim['task']} since {claim['since'][:10]}"
+
+
 def _task_row(note: Note, now: float) -> str:
-    return f"{note.key} | {note.title} | {humanize_age(age_days(note, now))} | {note.status}"
+    return f"{note.key} | {note.title} | {humanize_age(age_days(note, now))} | {note.status}{_claim_text(note)}"
 
 
 def _truncate(text: str) -> str:

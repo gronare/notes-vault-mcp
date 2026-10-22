@@ -122,7 +122,7 @@ and the contract for a note:
 ```yaml
 frontmatter:
   required: [title, date, updated, tags, status]
-  optional: [kind, area, summary, path, superseded_by]
+  optional: [kind, area, summary, path, superseded_by, priority, source, kelpie]
   area_required_in: [Projects, Resources, Log]
   status_values: [draft, active, complete, superseded]
   kind_values: [system, task, trap, howto, decision, reference, log]
@@ -183,7 +183,7 @@ Every call refreshes the index first, throttled to at most once every 20 seconds
 | `obsidian_access` | write | `--auth forwarded` only. Mints the personal token Obsidian's Remotely Save plugin uses over WebDAV and shows it once; a new token revokes the previous one. |
 | `lint` | moderate | Reads every note and reports drift. |
 | `init` | write | Sets a vault up: writes `.vault/schema.yml` and the Obsidian Bases views into the root and keeps what exists; `force` overwrites. The plugin's `/vault:init` calls it. |
-| `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional. Only `.md` notes outside dot-folders are written; the schema and the `.base` views come from `init`, and `read_file` still serves them. |
+| `write_file` | write | Validates against the schema and refuses the write if it does not hold. Stamps `updated`, fills `date`. Pass `expected_etag` to make the write conditional, or `"*"` to create a note that must not exist yet. On S3 the condition goes with the PUT itself (`If-Match`, `If-None-Match: *`); a server that refuses conditional PUTs gets a HEAD before the PUT instead, and the server logs that once. Only `.md` notes outside dot-folders are written; the schema and the `.base` views come from `init`, and `read_file` still serves them. |
 | `append_file` | write | Appends and bumps `updated`; the note must exist and still satisfy the schema. |
 | `set_status` | write | Changes a note's status without rewriting it: `backlog` with a priority parks it, `active` picks it up again. |
 | `close` | write | Sets status complete (or superseded, with `superseded_by`, when `merged_into` is given) and moves the note into the archive. |
@@ -201,7 +201,8 @@ vocabulary is strict), `unresolved_links`, `orphans` (no inbound wikilink; log a
 `stale_active`, `archive_status_mismatch`, `duplicate_stems`, `superseded_target_missing`. With `--park-stale`
 the open task notes untouched for longer than `stale_after_days` are set to `backlog` (priority `low`, source
 `veckolint <date>`) before the report and listed under `parked`, so `active` always means touched within the
-window; reviving one is `set_status(path, "active")`.
+window; reviving one is `set_status(path, "active")`. A note with a claim (`kelpie` key) made or refreshed within
+the last 14 days, counting from the later of its `since` and the note's `updated`, is left where it is.
 
 ```sh
 uvx notes-vault-mcp lint
@@ -222,7 +223,7 @@ sha does not appear in the repo log, and open task notes older than the schema's
 that the session read or wrote (found through the vault tool calls in the session transcript). It
 returns `{"decision": "block", "reason": ...}`, or nothing at all when the vault is up to date. Stale
 notes the session did not touch are the next session's business: `context` lists them under `triage`
-with the three ways to settle each (close, a dated line, or park in the backlog), not at every stop. Set `VAULT_STOP_HOOK=off` to silence the hook.
+with the three ways to settle each (close, a dated line, or park in the backlog), not at every stop. Set `VAULT_STOP_HOOK=off` to silence the hook, as a tool that runs agent sessions and writes the repo log itself can do in the settings `env` of the sessions it starts.
 
 ```json
 {
@@ -285,6 +286,12 @@ notes-vault-mcp task check Projects/myapp-fix-login.md --need problem,solution,d
 # {"missing": ["solution", "decisions"]}
 notes-vault-mcp task close Projects/myapp-fix-login.md        # {"path": "Archive/myapp-fix-login.md"}
 notes-vault-mcp task backlog Projects/myapp-fix-login.md --priority medium   # {"path": "Projects/…"}
+notes-vault-mcp task claim Projects/myapp-idea.md --machine mac --task fix-login --repo myapp [--force]
+# {"path": "Projects/myapp-idea.md", "claimed": true, "claim": {"machine": "mac", "task": "fix-login", "repo": "myapp", "since": "2026-10-23T09:12:00Z"}, "replaced": null}
+notes-vault-mcp task release Projects/myapp-idea.md [--machine mac]
+# {"path": "Projects/myapp-idea.md", "released": true, "claim": null}
+notes-vault-mcp task release --machine mac --task fix-login
+# {"paths": ["Projects/myapp-renamed.md"], "released": true}
 notes-vault-mcp log append --cwd ~/wt/wt1.myapp --line "Login fixed" --commit abc1234 --commit def5678
 # {"path": "Log/myapp-log.md"}
 notes-vault-mcp log path --repo myapp                         # {"path": "Log/myapp-log.md"}
@@ -301,6 +308,18 @@ status `active`, `path` set to the main checkout, `source: branch <name>`, and t
 with empty bodies; the stem is the repo plus the task name, made unique across the whole vault.
 `--note` claims an existing task note instead: status `active`, nothing else changed. `--branch`
 defaults to the branch checked out in `--cwd`.
+
+`task claim` says which machine and task work on a task note, in its `kelpie` frontmatter key
+(`machine`, `task`, `repo`, `since` in UTC), so a second machine on the same vault sees the note is
+taken. It changes only that key, as a conditional write against the version it read, and reads again
+when the note changed in between. A note another machine holds is left as it is and answered with
+`"claimed": false` and that machine's claim; `--force` takes it over and returns the old claim as
+`replaced`. The same machine claiming again keeps `since` when the task is the same. `task release`
+removes the key; with `--machine` it leaves another machine's claim in place and answers
+`"released": false`. Without a path, `--machine` and `--task` clear that task's claims wherever its notes are now, after a move or a rename; `"paths": []` means the note is gone, and its claim with it. `close` and a status change to `backlog` remove it too, and `write_file` keeps
+the stored claim whatever its content says, so only these commands change it. The index stores it in
+the `claim` column and `context` shows it on the note's row. List `kelpie` under `optional` in the
+schema and the server's instructions tell clients the key is not theirs to edit.
 
 `task check` takes the canonical keys `problem`, `solution`, `decisions`, `tests` and `scope`. A
 section is filled when it has any text under its heading, before the next heading of the same or a
